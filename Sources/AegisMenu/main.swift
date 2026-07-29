@@ -123,7 +123,7 @@ final class AegisPanelController: NSViewController {
 
         ensureConfig()
         providerStatus = runAegis(["status"])
-        let usage = runAegis(["usage", "openrouter"])
+        let usage = runAegis(["usage"])
         var priceArgs = ["price-watch"]
         if let priceFixturePath = priceFixturePath {
             priceArgs.append(priceFixturePath)
@@ -134,7 +134,7 @@ final class AegisPanelController: NSViewController {
         root.addArrangedSubview(titleBlock())
         root.addArrangedSubview(section(title: "Connect Keys", body: connectKeysSummary(), maxLines: 3))
         root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 4))
-        root.addArrangedSubview(section(title: "OpenRouter", body: usage, maxLines: 3))
+        root.addArrangedSubview(section(title: "Usage", body: usage, maxLines: 4))
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 3))
         root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 3))
         root.addArrangedSubview(actionsGrid())
@@ -173,9 +173,9 @@ final class AegisPanelController: NSViewController {
     private func connectKeysSummary() -> String {
         """
         Bind by storing API keys in macOS Keychain.
-        OpenRouter balance works after OPENROUTER_API_KEY.
-        OpenAI/Gemini/MiniMax currently link to billing pages.
-        Use Bind Keys to copy setup commands.
+        Setup stores keys in macOS Keychain.
+        Copy Key puts the selected key on clipboard.
+        Usage shows remaining percent when available.
         """
     }
 
@@ -227,7 +227,7 @@ final class AegisPanelController: NSViewController {
         let row1 = buttonRow([
             ("Refresh", { [weak self] in self?.onRefresh() }),
             ("Setup", { [weak self] in self?.setupAndRefresh() }),
-            ("Bind Keys", { [weak self] in self?.copyBindKeyCommands() }),
+            ("Copy Key", { [weak self] in self?.copyAPIKey() }),
         ])
         let row2 = buttonRow([
             ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
@@ -347,6 +347,42 @@ final class AegisPanelController: NSViewController {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(commands, forType: .string)
         showOutput(title: "Bind Keys", output: "Copied Keychain setup commands to clipboard. Paste them in Terminal after exporting each provider API key.")
+    }
+
+    private func copyAPIKey() {
+        let alert = NSAlert()
+        alert.messageText = "Copy API Key"
+        alert.informativeText = "Choose one key to copy directly to clipboard."
+        alert.addButton(withTitle: "OpenAI")
+        alert.addButton(withTitle: "Gemini")
+        alert.addButton(withTitle: "OpenRouter")
+        alert.addButton(withTitle: "MiniMax")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        let provider: String
+        switch response {
+        case .alertFirstButtonReturn:
+            provider = "openai"
+        case .alertSecondButtonReturn:
+            provider = "gemini"
+        case .alertThirdButtonReturn:
+            provider = "openrouter"
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
+            provider = "minimax"
+        default:
+            return
+        }
+
+        let key = runAegis(["key", "reveal", provider, "personal"])
+        guard !key.isEmpty, !key.hasPrefix("aegis:") else {
+            showOutput(title: "Copy API Key", output: key.isEmpty ? "No key found for \(provider)." : key)
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(key, forType: .string)
+        showOutput(title: "Copy API Key", output: "\(provider) API key copied to clipboard.")
     }
 
     private func runSilent(_ args: [String]) {

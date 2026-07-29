@@ -11,6 +11,8 @@ struct ProviderConfig: Codable {
     var apiKeyEnv: String
     var keyAlias: String?
     var defaultModel: String?
+    var monthlyBudgetUSD: Double?
+    var manualUsedUSD: Double?
     var dashboardURL: String?
     var billingURL: String?
     var keyURL: String?
@@ -92,6 +94,22 @@ struct OpenRouterKeyData: Codable {
         case usageWeekly = "usage_weekly"
         case usageMonthly = "usage_monthly"
     }
+}
+
+struct OpenAICostsResponse: Codable {
+    var data: [OpenAICostBucket]
+}
+
+struct OpenAICostBucket: Codable {
+    var results: [OpenAICostResult]
+}
+
+struct OpenAICostResult: Codable {
+    var amount: OpenAICostAmount
+}
+
+struct OpenAICostAmount: Codable {
+    var value: Double
 }
 
 enum AegisError: Error, CustomStringConvertible {
@@ -208,6 +226,8 @@ func writeSampleConfig() throws {
                 apiKeyEnv: "OPENAI_API_KEY",
                 keyAlias: "personal",
                 defaultModel: "gpt-4.1",
+                monthlyBudgetUSD: 100,
+                manualUsedUSD: nil,
                 dashboardURL: "https://platform.openai.com/usage",
                 billingURL: "https://platform.openai.com/settings/organization/billing/overview",
                 keyURL: "https://platform.openai.com/api-keys",
@@ -218,6 +238,8 @@ func writeSampleConfig() throws {
                 apiKeyEnv: "GEMINI_API_KEY",
                 keyAlias: "personal",
                 defaultModel: "gemini-2.5-pro",
+                monthlyBudgetUSD: nil,
+                manualUsedUSD: nil,
                 dashboardURL: "https://aistudio.google.com/",
                 billingURL: "https://console.cloud.google.com/billing",
                 keyURL: "https://aistudio.google.com/app/apikey",
@@ -228,6 +250,8 @@ func writeSampleConfig() throws {
                 apiKeyEnv: "OPENROUTER_API_KEY",
                 keyAlias: "personal",
                 defaultModel: "anthropic/claude-sonnet-4",
+                monthlyBudgetUSD: nil,
+                manualUsedUSD: nil,
                 dashboardURL: "https://openrouter.ai/activity",
                 billingURL: "https://openrouter.ai/credits",
                 keyURL: "https://openrouter.ai/settings/keys",
@@ -238,6 +262,8 @@ func writeSampleConfig() throws {
                 apiKeyEnv: "MINIMAX_API_KEY",
                 keyAlias: "personal",
                 defaultModel: "MiniMax-M1",
+                monthlyBudgetUSD: 100,
+                manualUsedUSD: 0,
                 dashboardURL: "https://platform.minimaxi.com/",
                 billingURL: "https://platform.minimaxi.com/",
                 keyURL: "https://platform.minimaxi.com/",
@@ -269,6 +295,7 @@ func runSetup() throws {
     let url = configURL()
     if FileManager.default.fileExists(atPath: url.path) {
         print("config exists: \(url.path)")
+        try migrateConfigDefaults(at: url)
     } else {
         try writeSampleConfig()
     }
@@ -278,6 +305,31 @@ func runSetup() throws {
     printStatus(config)
     print("")
     printConfigScan(config, suggest: true)
+}
+
+func migrateConfigDefaults(at url: URL) throws {
+    var config = try loadConfig()
+    var changed = false
+
+    if config.providers["openai"]?.monthlyBudgetUSD == nil {
+        config.providers["openai"]?.monthlyBudgetUSD = 100
+        changed = true
+    }
+    if config.providers["minimax"]?.monthlyBudgetUSD == nil {
+        config.providers["minimax"]?.monthlyBudgetUSD = 100
+        changed = true
+    }
+    if config.providers["minimax"]?.manualUsedUSD == nil {
+        config.providers["minimax"]?.manualUsedUSD = 0
+        changed = true
+    }
+
+    if changed {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(config).write(to: url, options: .atomic)
+        print("updated config defaults")
+    }
 }
 
 func runDoctor() throws {
@@ -505,8 +557,12 @@ func printPriceWatch(config: AegisConfig, models: [OpenRouterModel]) {
 }
 
 func printUsage(config: AegisConfig, args: [String]) throws {
-    guard args.first == "openrouter" else {
-        throw AegisError.message("usage: aegis usage openrouter")
+    guard let target = args.first else {
+        printUsageSummary(config: config)
+        return
+    }
+    guard target == "openrouter" else {
+        throw AegisError.message("usage: aegis usage [openrouter]")
     }
     guard let provider = config.providers["openrouter"] else {
         throw AegisError.message("openrouter provider is not configured")
@@ -527,6 +583,62 @@ func printUsage(config: AegisConfig, args: [String]) throws {
             print("  key limit: \(money(usage)) / \(money(limit))")
         }
     }
+}
+
+func printUsageSummary(config: AegisConfig) {
+    for providerName in ["openrouter", "openai", "minimax", "gemini"] {
+        guard let provider = config.providers[providerName] else { continue }
+        print(providerUsageLine(providerName: providerName, provider: provider))
+    }
+}
+
+func providerUsageLine(providerName: String, provider: ProviderConfig) -> String {
+    switch providerName {
+    case "openrouter":
+        do {
+            let apiKey = try providerAPIKey(providerName: providerName, provider: provider)
+            let credits = try fetchOpenRouterCredits(baseURL: provider.baseURL, apiKey: apiKey)
+            let remaining = 100 - credits.data.usedPercent
+            return "openrouter: \(percent(remaining)) remaining, \(money(credits.data.balance)) left"
+        } catch {
+            return "openrouter: missing key or usage unavailable"
+        }
+    case "openai":
+        let budget = (provider.monthlyBudgetUSD ?? 100)
+        guard budget > 0 else { return "openai: invalid monthlyBudgetUSD" }
+        let used = openAIUsedThisMonth(provider: provider)
+        switch used {
+        case .success(let value):
+            return "openai: \(percent(remainingPercent(limit: budget, used: value))) remaining, \(money(max(0, budget - value))) left"
+        case .failure:
+            if let manual = provider.manualUsedUSD {
+                return "openai: \(percent(remainingPercent(limit: budget, used: manual))) remaining, manual usage"
+            }
+            return "openai: key ready, costs API unavailable"
+        }
+    case "minimax":
+        let budget = (provider.monthlyBudgetUSD ?? 100)
+        guard budget > 0 else { return "minimax: invalid monthlyBudgetUSD" }
+        let used = provider.manualUsedUSD ?? 0
+        return "minimax: \(percent(remainingPercent(limit: budget, used: used))) remaining, manual usage"
+    case "gemini":
+        let ready = (try? providerAPIKey(providerName: providerName, provider: provider)) != nil
+        return ready ? "gemini: key ready, quota API not configured" : "gemini: missing key"
+    default:
+        return "\(providerName): unsupported"
+    }
+}
+
+func openAIUsedThisMonth(provider: ProviderConfig) -> Result<Double, Error> {
+    Result {
+        let apiKey = try providerAPIKey(providerName: "openai", provider: provider)
+        return try fetchOpenAICosts(apiKey: apiKey)
+    }
+}
+
+func remainingPercent(limit: Double, used: Double) -> Double {
+    guard limit > 0 else { return 0 }
+    return max(0, min(100, (limit - used) / limit * 100))
 }
 
 func printConfigScan(_ config: AegisConfig, suggest: Bool) {
@@ -626,6 +738,35 @@ func fetchOpenRouter<T: Decodable>(path: String, baseURL: String, apiKey: String
 
     let data = try httpData(request)
     return try JSONDecoder().decode(T.self, from: data)
+}
+
+func fetchOpenAICosts(apiKey: String) throws -> Double {
+    let calendar = Calendar(identifier: .gregorian)
+    let now = Date()
+    let components = calendar.dateComponents([.year, .month], from: now)
+    let start = calendar.date(from: components) ?? now
+    let startTime = Int(start.timeIntervalSince1970)
+
+    guard var components = URLComponents(string: "https://api.openai.com/v1/organization/costs") else {
+        throw AegisError.message("invalid OpenAI costs URL")
+    }
+    components.queryItems = [
+        URLQueryItem(name: "start_time", value: String(startTime)),
+        URLQueryItem(name: "bucket_width", value: "1d")
+    ]
+    guard let url = components.url else {
+        throw AegisError.message("invalid OpenAI costs query")
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.timeoutInterval = 15
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+    let data = try httpData(request)
+    let response = try JSONDecoder().decode(OpenAICostsResponse.self, from: data)
+    return response.data.flatMap(\.results).map(\.amount.value).reduce(0, +)
 }
 
 func httpData(_ request: URLRequest) throws -> Data {
