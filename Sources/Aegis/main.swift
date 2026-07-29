@@ -188,7 +188,7 @@ func configURL() -> URL {
 func loadConfig() throws -> AegisConfig {
     let url = configURL()
     guard FileManager.default.fileExists(atPath: url.path) else {
-        throw AegisError.message("missing config at \(url.path); run 'aegis init-sample'")
+        throw AegisError.message("missing config at \(url.path); run 'aegis setup'")
     }
     let data = try Data(contentsOf: url)
     return try JSONDecoder().decode(AegisConfig.self, from: data)

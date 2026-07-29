@@ -132,6 +132,7 @@ final class AegisPanelController: NSViewController {
         let scan = runAegis(["scan"])
 
         root.addArrangedSubview(titleBlock())
+        root.addArrangedSubview(section(title: "Connect Keys", body: connectKeysSummary(), maxLines: 5))
         root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 6))
         root.addArrangedSubview(section(title: "OpenRouter", body: usage, maxLines: 4))
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 4))
@@ -167,6 +168,15 @@ final class AegisPanelController: NSViewController {
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(subtitle)
         return stack
+    }
+
+    private func connectKeysSummary() -> String {
+        """
+        Bind by storing API keys in macOS Keychain.
+        OpenRouter balance works after OPENROUTER_API_KEY.
+        OpenAI/Gemini/MiniMax currently link to billing pages.
+        Use Bind Keys to copy setup commands.
+        """
     }
 
     private func section(title: String, body: String, maxLines: Int) -> NSView {
@@ -216,20 +226,21 @@ final class AegisPanelController: NSViewController {
 
         let row1 = buttonRow([
             ("Refresh", { [weak self] in self?.onRefresh() }),
-            ("Setup", { [weak self] in self?.showCommand("Setup", ["setup"]) }),
-            ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
+            ("Setup", { [weak self] in self?.setupAndRefresh() }),
+            ("Bind Keys", { [weak self] in self?.copyBindKeyCommands() }),
         ])
         let row2 = buttonRow([
+            ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
             ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) }),
-            ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) }),
-            ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) })
+            ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) })
         ])
         let row3 = buttonRow([
+            ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
             ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
-            ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) }),
-            ("MiniMax", { [weak self] in self?.runSilent(["open", "minimax", "dashboard"]) }),
+            ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) })
         ])
         let row4 = buttonRow([
+            ("MiniMax", { [weak self] in self?.runSilent(["open", "minimax", "dashboard"]) }),
             ("Quit", { NSApp.terminate(nil) })
         ])
 
@@ -256,6 +267,23 @@ final class AegisPanelController: NSViewController {
 
     private func showCommand(_ title: String, _ args: [String]) {
         showOutput(title: title, output: runAegis(args))
+    }
+
+    private func setupAndRefresh() {
+        showOutput(title: "Setup", output: runAegis(["setup"]))
+        onRefresh()
+    }
+
+    private func copyBindKeyCommands() {
+        let commands = """
+        printf '%s' "$OPENAI_API_KEY" | aegis key set openai personal
+        printf '%s' "$GEMINI_API_KEY" | aegis key set gemini personal
+        printf '%s' "$OPENROUTER_API_KEY" | aegis key set openrouter personal
+        printf '%s' "$MINIMAX_API_KEY" | aegis key set minimax personal
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(commands, forType: .string)
+        showOutput(title: "Bind Keys", output: "Copied Keychain setup commands to clipboard. Paste them in Terminal after exporting each provider API key.")
     }
 
     private func runSilent(_ args: [String]) {
