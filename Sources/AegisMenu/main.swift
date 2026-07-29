@@ -170,13 +170,19 @@ final class AegisPanelController: NSViewController {
             ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) })
         ])
         let row2 = buttonRow([
-            ("OpenRouter Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
-            ("OpenAI Billing", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
+            ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) }),
+            ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
+            ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) })
+        ])
+        let row3 = buttonRow([
+            ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) }),
+            ("MiniMax", { [weak self] in self?.runSilent(["open", "minimax", "dashboard"]) }),
             ("Quit", { NSApp.terminate(nil) })
         ])
 
         stack.addArrangedSubview(row1)
         stack.addArrangedSubview(row2)
+        stack.addArrangedSubview(row3)
         return stack
     }
 
@@ -200,6 +206,13 @@ final class AegisPanelController: NSViewController {
 
     private func runSilent(_ args: [String]) {
         _ = runAegis(args)
+    }
+
+    private func copyCommand(_ args: [String]) {
+        let output = runAegis(args)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(output, forType: .string)
+        showOutput(title: "Copied", output: output.isEmpty ? "No output" : "Copied to clipboard.")
     }
 
     private func runAegis(_ args: [String]) -> String {
