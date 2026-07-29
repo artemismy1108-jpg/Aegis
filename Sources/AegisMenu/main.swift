@@ -10,6 +10,9 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
                 .appendingPathComponent("aegis")
                 .path
     }
+    private var priceFixturePath: String? {
+        Bundle.main.path(forResource: "openrouter-models.sample", ofType: "json")
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.title = "Aegis"
@@ -20,21 +23,60 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
 
     @objc private func showMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Aegis", action: nil, keyEquivalent: ""))
+        refreshStatusTitle()
+        addHeader("Aegis", to: menu)
         menu.addItem(.separator())
-        addCommand("Status", ["status"], to: menu)
-        addCommand("Doctor", ["doctor"], to: menu)
-        addCommand("Scan Config", ["scan", "--suggest"], to: menu)
+
+        addOutputSection("Providers", ["status"], to: menu, maxLines: 6)
         menu.addItem(.separator())
-        addCommand("OpenRouter Usage", ["usage", "openrouter"], to: menu)
-        addCommand("Price Watch", ["price-watch"], to: menu)
+
+        addOutputSection("OpenRouter Usage", ["usage", "openrouter"], to: menu, maxLines: 6)
         menu.addItem(.separator())
+
+        var priceArgs = ["price-watch"]
+        if let priceFixturePath = priceFixturePath {
+            priceArgs.append(priceFixturePath)
+        }
+        addOutputSection("Price Watch", priceArgs, to: menu, maxLines: 5)
+        menu.addItem(.separator())
+
+        addOutputSection("Config Scan", ["scan"], to: menu, maxLines: 8)
+        menu.addItem(.separator())
+
+        addCommand("Refresh", ["status"], to: menu)
+        addCommand("Doctor Details", ["doctor"], to: menu)
+        addCommand("Scan Suggestions", ["scan", "--suggest"], to: menu)
         addOpenSubmenu(to: menu)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    private func addHeader(_ title: String, to menu: NSMenu) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        menu.addItem(item)
+    }
+
+    private func addOutputSection(_ title: String, _ args: [String], to menu: NSMenu, maxLines: Int) {
+        addHeader(title, to: menu)
+        let output = runAegis(args)
+        let lines = output
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        let visible = lines.isEmpty ? ["No data"] : Array(lines.prefix(maxLines))
+        for line in visible {
+            let item = NSMenuItem(title: "  \(line)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        if lines.count > maxLines {
+            let item = NSMenuItem(title: "  ...", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
     }
 
     private func addCommand(_ title: String, _ args: [String], to menu: NSMenu) {
@@ -95,6 +137,15 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
         alert.informativeText = output.isEmpty ? "Done" : output
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func refreshStatusTitle() {
+        let output = runAegis(["status"])
+        let ready = output
+            .split(separator: "\n")
+            .filter { $0.contains("ready") }
+            .count
+        statusItem.button?.title = ready > 0 ? "Aegis \(ready)/4" : "Aegis"
     }
 
     @objc private func quit() {

@@ -35,7 +35,8 @@ open /Applications/Aegis.app
 
 The preview menu bar app is intentionally thin: it shells out to the bundled
 `aegis` CLI for status, doctor, scan, OpenRouter usage, price-watch, and provider
-page shortcuts.
+page shortcuts. The menu itself shows provider status, OpenRouter usage, price
+watch results, and config scan results inline, with action items below.
 
 Store a key in macOS Keychain:
 
