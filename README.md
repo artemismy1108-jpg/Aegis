@@ -74,12 +74,13 @@ monthly, and key-limit usage when OpenRouter returns those fields.
 Local config scan:
 
 ```bash
-.build/aegis scan
+.build/aegis scan --suggest
 ```
 
 `scan` checks configured paths such as `~/.zshrc` and `~/.config/codex/config.toml`
 and reports which provider env names are mentioned. It never prints the env
-values.
+values. `--suggest` adds next-step commands for storing discovered providers in
+Keychain and exporting config.
 
 Secret export is explicit:
 

@@ -136,7 +136,7 @@ func run(_ args: [String]) throws {
         try printUsage(config: config, args: Array(args.dropFirst()))
     case "scan":
         let config = try loadConfig()
-        printConfigScan(config)
+        printConfigScan(config, suggest: args.contains("--suggest"))
     case "key":
         try runKeyCommand(Array(args.dropFirst()))
     default:
@@ -154,7 +154,7 @@ func printHelp() {
       aegis export [env|json|codex|workbuddy] [--with-secrets]
       aegis price-watch [models.json]
       aegis usage openrouter
-      aegis scan
+      aegis scan [--suggest]
       aegis key set <provider> <alias>
       aegis key list
       aegis key reveal <provider> <alias>
@@ -422,11 +422,12 @@ func printUsage(config: AegisConfig, args: [String]) throws {
     }
 }
 
-func printConfigScan(_ config: AegisConfig) {
+func printConfigScan(_ config: AegisConfig, suggest: Bool) {
     let envsByProvider = Dictionary(uniqueKeysWithValues: config.providers.map { name, provider in
         (name, recognizedAPIKeyEnvs(providerName: name, provider: provider))
     })
-    let paths = Array(Set(config.providers.values.flatMap(\.configPaths))).sorted()
+    let paths = Array(Set(config.providers.values.flatMap(\.configPaths) + commonConfigPaths())).sorted()
+    var foundProviders = Set<String>()
 
     for rawPath in paths {
         let path = NSString(string: rawPath).expandingTildeInPath
@@ -440,12 +441,50 @@ func printConfigScan(_ config: AegisConfig) {
         let hits = envsByProvider
             .flatMap { provider, envs in envs.filter { text.contains($0) }.map { "\(provider):\($0)" } }
             .sorted()
+        hits.forEach { hit in
+            if let provider = hit.split(separator: ":").first {
+                foundProviders.insert(String(provider))
+            }
+        }
         if hits.isEmpty {
             print("\(rawPath): exists")
         } else {
             print("\(rawPath): \(hits.joined(separator: ", "))")
         }
     }
+
+    if suggest {
+        print("")
+        print("Suggestions")
+        for providerName in config.providers.keys.sorted() {
+            guard let provider = config.providers[providerName] else { continue }
+            let alias = provider.keyAlias ?? "default"
+            let env = provider.apiKeyEnv
+            if foundProviders.contains(providerName) {
+                print("- Store \(providerName) in Keychain: printf '%s' \"$\((env))\" | aegis key set \(providerName) \(alias)")
+            } else {
+                print("- Add \(providerName) env or Keychain key: aegis key set \(providerName) \(alias)")
+            }
+        }
+        print("- Export safe config: aegis export codex")
+        print("- Export with secrets after review: aegis export codex --with-secrets")
+    }
+}
+
+func commonConfigPaths() -> [String] {
+    [
+        "~/.zshrc",
+        "~/.zprofile",
+        "~/.bashrc",
+        "~/.bash_profile",
+        "~/.profile",
+        "~/.env",
+        "~/.config/aegis/config.json",
+        "~/.config/codex/config.toml",
+        "~/.codex/config.toml",
+        "~/.config/workbuddy/config.toml",
+        "~/.workbuddy/config.toml"
+    ]
 }
 
 func providerAPIKey(providerName: String, provider: ProviderConfig) throws -> String {

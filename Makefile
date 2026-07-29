@@ -11,9 +11,9 @@ build:
 smoke: build
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) init-sample
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) status
+	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) scan --suggest
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) export codex
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) price-watch Fixtures/openrouter-models.sample.json
 
 clean:
 	rm -rf $(BUILD_DIR)
-
