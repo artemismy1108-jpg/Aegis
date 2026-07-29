@@ -78,7 +78,7 @@ final class AegisPanelController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 
-        let document = NSView()
+        let document = FlippedView()
         document.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = document
 
@@ -120,7 +120,9 @@ final class AegisPanelController: NSViewController {
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 4))
         root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 4))
         root.addArrangedSubview(actionsGrid())
+        view.layoutSubtreeIfNeeded()
         scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func clearRoot() {
@@ -196,7 +198,7 @@ final class AegisPanelController: NSViewController {
         stack.spacing = 8
 
         let row1 = buttonRow([
-            ("Refresh", { [weak self] in self?.refresh() }),
+            ("Refresh", { [weak self] in DispatchQueue.main.async { self?.refresh() } }),
             ("Setup", { [weak self] in self?.showCommand("Setup", ["setup"]) }),
             ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
         ])
@@ -313,6 +315,10 @@ final class ClosureButton: NSButton {
     @objc private func run() {
         closure()
     }
+}
+
+final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 let app = NSApplication.shared
