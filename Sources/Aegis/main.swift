@@ -141,6 +141,9 @@ func run(_ args: [String]) throws {
         printConfigScan(config, suggest: args.contains("--suggest"))
     case "doctor":
         try runDoctor()
+    case "open":
+        let config = try loadConfig()
+        try runOpen(config: config, args: Array(args.dropFirst()))
     case "key":
         try runKeyCommand(Array(args.dropFirst()))
     default:
@@ -161,6 +164,7 @@ func printHelp() {
       aegis usage openrouter
       aegis scan [--suggest]
       aegis doctor
+      aegis open <provider> [dashboard|billing|keys]
       aegis key set <provider> <alias>
       aegis key list
       aegis key reveal <provider> <alias>
@@ -313,6 +317,44 @@ func runDoctor() throws {
         print("- price watch: aegis price-watch")
     } else {
         print("- provider missing")
+    }
+}
+
+func runOpen(config: AegisConfig, args: [String]) throws {
+    guard let providerName = args.first else {
+        throw AegisError.message("usage: aegis open <provider> [dashboard|billing|keys]")
+    }
+    let target = args.dropFirst().first ?? "dashboard"
+    guard let provider = config.providers[providerName] else {
+        throw AegisError.message("unknown provider '\(providerName)'")
+    }
+
+    let rawURL: String?
+    switch target {
+    case "dashboard":
+        rawURL = provider.dashboardURL
+    case "billing":
+        rawURL = provider.billingURL
+    case "keys", "key":
+        rawURL = provider.keyURL
+    default:
+        throw AegisError.message("unknown open target '\(target)'")
+    }
+
+    guard let url = rawURL, !url.isEmpty else {
+        throw AegisError.message("\(providerName) has no \(target) URL configured")
+    }
+    try openURL(url)
+}
+
+func openURL(_ url: String) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+    process.arguments = [url]
+    try process.run()
+    process.waitUntilExit()
+    if process.terminationStatus != 0 {
+        throw AegisError.message("failed to open \(url)")
     }
 }
 

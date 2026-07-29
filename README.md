@@ -91,6 +91,14 @@ Doctor:
 `doctor` summarizes config presence, provider credential state, safe/secret
 export readiness, and OpenRouter next steps.
 
+Open provider pages:
+
+```bash
+.build/aegis open openrouter keys
+.build/aegis open openai billing
+.build/aegis open gemini dashboard
+```
+
 Secret export is explicit:
 
 ```bash
