@@ -8,6 +8,8 @@
 	<string>local.aegis.menu</string>
 	<key>CFBundleName</key>
 	<string>Aegis</string>
+	<key>CFBundleIconFile</key>
+	<string>Aegis</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -18,6 +18,7 @@ app: build
 	mkdir -p $(APP_DIR)/Contents/MacOS $(APP_DIR)/Contents/Resources
 	cp $(BIN) $(APP_DIR)/Contents/Resources/aegis
 	cp Fixtures/openrouter-models.sample.json $(APP_DIR)/Contents/Resources/openrouter-models.sample.json
+	cp App/Assets/Aegis.icns $(APP_DIR)/Contents/Resources/Aegis.icns
 	cp App/Info.plist $(APP_DIR)/Contents/Info.plist
 	$(SWIFTC) -module-cache-path $(BUILD_DIR)/module-cache -framework AppKit Sources/AegisMenu/main.swift -o $(APP_BIN)
 
