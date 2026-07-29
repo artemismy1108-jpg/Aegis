@@ -24,7 +24,7 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
         statusItem.button?.action = #selector(togglePopover)
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 420, height: 640)
+        popover.contentSize = NSSize(width: 420, height: 520)
         popover.contentViewController = controller
         controller.refresh()
     }
@@ -68,21 +68,36 @@ final class AegisPanelController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 640))
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 520))
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scrollView)
+
+        let document = NSView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = document
 
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 12
         root.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(root)
+        document.addSubview(root)
 
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            root.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
-            root.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -16)
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            root.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 16),
+            root.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -16),
+            root.topAnchor.constraint(equalTo: document.topAnchor, constant: 16),
+            root.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16)
         ])
     }
 
@@ -101,9 +116,9 @@ final class AegisPanelController: NSViewController {
 
         root.addArrangedSubview(titleBlock())
         root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 6))
-        root.addArrangedSubview(section(title: "OpenRouter", body: usage, maxLines: 6))
-        root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 5))
-        root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 7))
+        root.addArrangedSubview(section(title: "OpenRouter", body: usage, maxLines: 4))
+        root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 4))
+        root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 4))
         root.addArrangedSubview(actionsGrid())
     }
 
