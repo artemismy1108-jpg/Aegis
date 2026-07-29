@@ -19,6 +19,17 @@ make build
 .build/aegis doctor
 ```
 
+Build the local menu bar app:
+
+```bash
+make app
+open .build/Aegis.app
+```
+
+The preview menu bar app is intentionally thin: it shells out to the bundled
+`aegis` CLI for status, doctor, scan, OpenRouter usage, price-watch, and provider
+page shortcuts.
+
 Store a key in macOS Keychain:
 
 ```bash

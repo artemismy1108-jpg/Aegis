@@ -1,12 +1,25 @@
 SWIFTC := swiftc
 BUILD_DIR := .build
 BIN := $(BUILD_DIR)/aegis
+APP_NAME := Aegis
+APP_DIR := $(BUILD_DIR)/$(APP_NAME).app
+APP_BIN := $(APP_DIR)/Contents/MacOS/$(APP_NAME)
 
-.PHONY: build smoke clean
+.PHONY: build app run-app smoke clean
 
 build:
 	mkdir -p $(BUILD_DIR)
 	$(SWIFTC) -module-cache-path $(BUILD_DIR)/module-cache Sources/Aegis/main.swift -o $(BIN)
+
+app: build
+	rm -rf $(APP_DIR)
+	mkdir -p $(APP_DIR)/Contents/MacOS $(APP_DIR)/Contents/Resources
+	cp $(BIN) $(APP_DIR)/Contents/Resources/aegis
+	cp App/Info.plist $(APP_DIR)/Contents/Info.plist
+	$(SWIFTC) -module-cache-path $(BUILD_DIR)/module-cache -framework AppKit Sources/AegisMenu/main.swift -o $(APP_BIN)
+
+run-app: app
+	open $(APP_DIR)
 
 smoke: build
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) setup
