@@ -4,7 +4,7 @@ import Foundation
 final class AegisMenuApp: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
-    private lazy var controller = AegisPanelController(aegisPath: aegisPath, priceFixturePath: priceFixturePath)
+    private var controller: AegisPanelController?
 
     private var aegisPath: String {
         Bundle.main.path(forResource: "aegis", ofType: nil)
@@ -25,8 +25,7 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
 
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 420, height: 520)
-        popover.contentViewController = controller
-        controller.refresh()
+        replacePanelContent()
     }
 
     @objc private func togglePopover() {
@@ -34,18 +33,34 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
             return
         }
-        controller.refresh()
+        replacePanelContent()
         refreshStatusTitle()
         if let button = statusItem.button {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
 
+    private func replacePanelContent() {
+        let nextController = AegisPanelController(
+            aegisPath: aegisPath,
+            priceFixturePath: priceFixturePath,
+            onRefresh: { [weak self] in
+                DispatchQueue.main.async {
+                    self?.replacePanelContent()
+                    self?.refreshStatusTitle()
+                }
+            }
+        )
+        nextController.refresh()
+        controller = nextController
+        popover.contentViewController = nextController
+    }
+
     private func refreshStatusTitle() {
-        let ready = controller.providerStatus
+        let ready = controller?.providerStatus
             .split(separator: "\n")
             .filter { $0.contains("ready") }
-            .count
+            .count ?? 0
         statusItem.button?.title = ready > 0 ? "Aegis \(ready)/4" : "Aegis"
     }
 }
@@ -53,14 +68,16 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
 final class AegisPanelController: NSViewController {
     private let aegisPath: String
     private let priceFixturePath: String?
+    private let onRefresh: () -> Void
     private let root = NSStackView()
     private let scrollView = NSScrollView()
 
     private(set) var providerStatus = ""
 
-    init(aegisPath: String, priceFixturePath: String?) {
+    init(aegisPath: String, priceFixturePath: String?, onRefresh: @escaping () -> Void) {
         self.aegisPath = aegisPath
         self.priceFixturePath = priceFixturePath
+        self.onRefresh = onRefresh
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -198,7 +215,7 @@ final class AegisPanelController: NSViewController {
         stack.spacing = 8
 
         let row1 = buttonRow([
-            ("Refresh", { [weak self] in DispatchQueue.main.async { self?.refresh() } }),
+            ("Refresh", { [weak self] in self?.onRefresh() }),
             ("Setup", { [weak self] in self?.showCommand("Setup", ["setup"]) }),
             ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
         ])
