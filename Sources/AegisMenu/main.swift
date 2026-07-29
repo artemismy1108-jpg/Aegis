@@ -166,23 +166,27 @@ final class AegisPanelController: NSViewController {
 
         let row1 = buttonRow([
             ("Refresh", { [weak self] in self?.refresh() }),
+            ("Setup", { [weak self] in self?.showCommand("Setup", ["setup"]) }),
             ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
-            ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) })
         ])
         let row2 = buttonRow([
+            ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) }),
             ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) }),
-            ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
-            ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) })
+            ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) })
         ])
         let row3 = buttonRow([
+            ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
             ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) }),
             ("MiniMax", { [weak self] in self?.runSilent(["open", "minimax", "dashboard"]) }),
+        ])
+        let row4 = buttonRow([
             ("Quit", { NSApp.terminate(nil) })
         ])
 
         stack.addArrangedSubview(row1)
         stack.addArrangedSubview(row2)
         stack.addArrangedSubview(row3)
+        stack.addArrangedSubview(row4)
         return stack
     }
 
