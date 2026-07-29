@@ -7,6 +7,13 @@
 - Identify provider clients, menu UI, CLI entry points, config storage, and tests.
 - Decide whether to fork in place or port pieces into a clean Aegis app.
 
+Current fallback while upstream intake is blocked in the Codex environment:
+
+- Keep a tiny Swift CLI core in this repo.
+- Implement provider metadata, safe config export, and OpenRouter price-watch
+  logic there first.
+- Reuse that core from the future menu bar app where practical.
+
 ## Phase 2: Rebrand And Scope
 
 - Rename visible app strings to Aegis.
@@ -47,4 +54,3 @@
 - Run existing tests.
 - Add one focused check per new non-trivial module.
 - Manually test Touch ID fallback and key masking.
-

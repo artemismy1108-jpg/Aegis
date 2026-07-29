@@ -1,0 +1,45 @@
+{
+  "data": [
+    {
+      "id": "anthropic/claude-sonnet-4",
+      "name": "Claude Sonnet 4",
+      "context_length": 200000,
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000015"
+      },
+      "supported_parameters": ["tools", "structured_outputs"]
+    },
+    {
+      "id": "qwen/qwen3-coder",
+      "name": "Qwen3 Coder",
+      "context_length": 262000,
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000003"
+      },
+      "supported_parameters": ["tools"]
+    },
+    {
+      "id": "google/gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash",
+      "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.0000003",
+        "completion": "0.0000025"
+      },
+      "supported_parameters": ["tools", "structured_outputs"]
+    },
+    {
+      "id": "tiny/no-tools",
+      "name": "Tiny No Tools",
+      "context_length": 128000,
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000001"
+      },
+      "supported_parameters": []
+    }
+  ]
+}
+

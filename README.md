@@ -39,3 +39,24 @@ Fallback path:
 If CodexBar is too coupled or hard to rebrand, keep this repo as a clean SwiftUI
 MenuBarExtra app and port only provider clients and CLI ideas from CodexBar.
 
+## Current Developer Preview
+
+The repo currently includes a small `aegis` CLI core while the CodexBar upstream
+intake is blocked by local GitHub DNS/SSH-agent issues in the Codex environment.
+
+Build:
+
+```bash
+make build
+```
+
+Try the safe local flow:
+
+```bash
+AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis init-sample
+AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis status
+AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis export codex
+AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis price-watch Fixtures/openrouter-models.sample.json
+```
+
+This preview intentionally exports env-var references, not raw API keys.
