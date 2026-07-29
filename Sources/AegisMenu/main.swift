@@ -270,8 +270,71 @@ final class AegisPanelController: NSViewController {
     }
 
     private func setupAndRefresh() {
-        showOutput(title: "Setup", output: runAegis(["setup"]))
+        let setupOutput = runAegis(["setup"])
+        var stored: [String] = []
+        var errors: [String] = []
+
+        for provider in setupProviders() {
+            guard let secret = promptForAPIKey(provider: provider) else {
+                continue
+            }
+            let output = runAegis(["key", "set", provider.name, "personal"], input: secret)
+            if output.contains("stored") {
+                stored.append(provider.displayName)
+            } else {
+                errors.append("\(provider.displayName): \(output)")
+            }
+        }
+
+        var summary = setupOutput
+        if !stored.isEmpty {
+            summary += "\n\nStored keys: \(stored.joined(separator: ", "))"
+        }
+        if !errors.isEmpty {
+            summary += "\n\nErrors:\n\(errors.joined(separator: "\n"))"
+        }
+        if stored.isEmpty && errors.isEmpty {
+            summary += "\n\nNo keys were added. You can run Setup again later."
+        }
+        showOutput(title: "Setup Complete", output: summary)
         onRefresh()
+    }
+
+    private func setupProviders() -> [(name: String, displayName: String, keyURLArg: [String])] {
+        [
+            ("openrouter", "OpenRouter", ["open", "openrouter", "keys"]),
+            ("openai", "OpenAI", ["open", "openai", "keys"]),
+            ("gemini", "Gemini", ["open", "gemini", "keys"]),
+            ("minimax", "MiniMax", ["open", "minimax", "dashboard"])
+        ]
+    }
+
+    private func promptForAPIKey(provider: (name: String, displayName: String, keyURLArg: [String])) -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Add \(provider.displayName) API Key"
+        alert.informativeText = "Paste the API key to store it in macOS Keychain. Choose Open Keys to get one, or Skip to add it later."
+        alert.addButton(withTitle: "Store")
+        alert.addButton(withTitle: "Skip")
+        alert.addButton(withTitle: "Open Keys")
+
+        let input = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        input.placeholderString = "\(provider.displayName) API key"
+        alert.accessoryView = input
+
+        while true {
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let secret = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !secret.isEmpty {
+                    return secret
+                }
+                NSSound.beep()
+            } else if response == .alertThirdButtonReturn {
+                runSilent(provider.keyURLArg)
+            } else {
+                return nil
+            }
+        }
     }
 
     private func copyBindKeyCommands() {
@@ -297,7 +360,7 @@ final class AegisPanelController: NSViewController {
         showOutput(title: "Copied", output: output.isEmpty ? "No output" : "Copied to clipboard.")
     }
 
-    private func runAegis(_ args: [String]) -> String {
+    private func runAegis(_ args: [String], input: String? = nil) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: aegisPath)
         process.arguments = args
@@ -305,9 +368,17 @@ final class AegisPanelController: NSViewController {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
+        let inputPipe = input.map { _ in Pipe() }
+        if let inputPipe = inputPipe {
+            process.standardInput = inputPipe
+        }
 
         do {
             try process.run()
+            if let input = input, let inputPipe = inputPipe {
+                inputPipe.fileHandleForWriting.write(Data(input.utf8))
+                inputPipe.fileHandleForWriting.closeFile()
+            }
             process.waitUntilExit()
         } catch {
             return "Failed to run aegis: \(error.localizedDescription)"
