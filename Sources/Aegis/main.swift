@@ -139,6 +139,8 @@ func run(_ args: [String]) throws {
     case "scan":
         let config = try loadConfig()
         printConfigScan(config, suggest: args.contains("--suggest"))
+    case "doctor":
+        try runDoctor()
     case "key":
         try runKeyCommand(Array(args.dropFirst()))
     default:
@@ -158,6 +160,7 @@ func printHelp() {
       aegis price-watch [models.json]
       aegis usage openrouter
       aegis scan [--suggest]
+      aegis doctor
       aegis key set <provider> <alias>
       aegis key list
       aegis key reveal <provider> <alias>
@@ -269,6 +272,48 @@ func runSetup() throws {
     printStatus(config)
     print("")
     printConfigScan(config, suggest: true)
+}
+
+func runDoctor() throws {
+    print("Aegis doctor")
+    print("")
+
+    let url = configURL()
+    print("config: \(FileManager.default.fileExists(atPath: url.path) ? url.path : "missing at \(url.path)")")
+
+    guard FileManager.default.fileExists(atPath: url.path) else {
+        print("next: aegis setup")
+        return
+    }
+
+    let config = try loadConfig()
+    print("")
+    print("providers")
+    printStatus(config)
+    print("")
+    print("scan")
+    printConfigScan(config, suggest: false)
+    print("")
+    print("exports")
+    print("- safe codex: ready")
+    print("- safe workbuddy: ready")
+    let secretReady = config.profiles.values.allSatisfy { profile in
+        guard let provider = config.providers[profile.provider] else { return false }
+        return keychainHasKey(provider: profile.provider, alias: provider.keyAlias ?? "default")
+    }
+    print("- secret profile export: \(secretReady ? "ready" : "missing profile Keychain key")")
+    print("")
+    print("openrouter")
+    if let provider = config.providers["openrouter"] {
+        let envReady = recognizedAPIKeyEnvs(providerName: "openrouter", provider: provider)
+            .contains { ProcessInfo.processInfo.environment[$0] != nil }
+        let keyReady = keychainHasKey(provider: "openrouter", alias: provider.keyAlias ?? "default")
+        print("- credentials: \(envReady || keyReady ? "ready" : "missing")")
+        print("- usage: aegis usage openrouter")
+        print("- price watch: aegis price-watch")
+    } else {
+        print("- provider missing")
+    }
 }
 
 func printStatus(_ config: AegisConfig) {

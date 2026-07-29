@@ -82,6 +82,15 @@ and reports which provider env names are mentioned. It never prints the env
 values. `--suggest` adds next-step commands for storing discovered providers in
 Keychain and exporting config.
 
+Doctor:
+
+```bash
+.build/aegis doctor
+```
+
+`doctor` summarizes config presence, provider credential state, safe/secret
+export readiness, and OpenRouter next steps.
+
 Secret export is explicit:
 
 ```bash

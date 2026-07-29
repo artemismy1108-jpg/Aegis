@@ -10,6 +10,7 @@ build:
 
 smoke: build
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) setup
+	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) doctor
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) status
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) scan --suggest
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) export codex
