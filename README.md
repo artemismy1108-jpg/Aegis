@@ -53,7 +53,7 @@ make build
 Try the safe local flow:
 
 ```bash
-AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis init-sample
+AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis setup
 AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis status
 AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis export codex
 AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis price-watch Fixtures/openrouter-models.sample.json

@@ -9,7 +9,7 @@ build:
 	$(SWIFTC) -module-cache-path $(BUILD_DIR)/module-cache Sources/Aegis/main.swift -o $(BIN)
 
 smoke: build
-	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) init-sample
+	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) setup
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) status
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) scan --suggest
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) export codex

@@ -119,6 +119,8 @@ func run(_ args: [String]) throws {
         printHelp()
     case "init-sample":
         try writeSampleConfig()
+    case "setup":
+        try runSetup()
     case "status":
         let config = try loadConfig()
         printStatus(config)
@@ -150,6 +152,7 @@ func printHelp() {
 
     Usage:
       aegis init-sample
+      aegis setup
       aegis status
       aegis export [env|json|codex|workbuddy] [--with-secrets]
       aegis price-watch [models.json]
@@ -251,6 +254,21 @@ func writeSampleConfig() throws {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     try encoder.encode(sample).write(to: url, options: .atomic)
     print("wrote \(url.path)")
+}
+
+func runSetup() throws {
+    let url = configURL()
+    if FileManager.default.fileExists(atPath: url.path) {
+        print("config exists: \(url.path)")
+    } else {
+        try writeSampleConfig()
+    }
+
+    let config = try loadConfig()
+    print("")
+    printStatus(config)
+    print("")
+    printConfigScan(config, suggest: true)
 }
 
 func printStatus(_ config: AegisConfig) {
