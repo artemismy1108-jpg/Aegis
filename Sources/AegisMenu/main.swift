@@ -54,6 +54,7 @@ final class AegisPanelController: NSViewController {
     private let aegisPath: String
     private let priceFixturePath: String?
     private let root = NSStackView()
+    private let scrollView = NSScrollView()
 
     private(set) var providerStatus = ""
 
@@ -72,7 +73,6 @@ final class AegisPanelController: NSViewController {
         view.wantsLayer = true
         view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
 
-        let scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -102,7 +102,7 @@ final class AegisPanelController: NSViewController {
     }
 
     func refresh() {
-        root.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        clearRoot()
 
         ensureConfig()
         providerStatus = runAegis(["status"])
@@ -120,6 +120,14 @@ final class AegisPanelController: NSViewController {
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 4))
         root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 4))
         root.addArrangedSubview(actionsGrid())
+        scrollView.contentView.scroll(to: .zero)
+    }
+
+    private func clearRoot() {
+        for view in root.arrangedSubviews {
+            root.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
     }
 
     private func ensureConfig() {
