@@ -55,6 +55,45 @@ struct Pricing: Codable {
     var completion: String
 }
 
+struct OpenRouterCreditsResponse: Codable {
+    var data: OpenRouterCreditsData
+}
+
+struct OpenRouterCreditsData: Codable {
+    var totalCredits: Double
+    var totalUsage: Double
+
+    enum CodingKeys: String, CodingKey {
+        case totalCredits = "total_credits"
+        case totalUsage = "total_usage"
+    }
+
+    var balance: Double { max(0, totalCredits - totalUsage) }
+    var usedPercent: Double {
+        totalCredits > 0 ? min(100, totalUsage / totalCredits * 100) : 0
+    }
+}
+
+struct OpenRouterKeyResponse: Codable {
+    var data: OpenRouterKeyData
+}
+
+struct OpenRouterKeyData: Codable {
+    var limit: Double?
+    var usage: Double?
+    var usageDaily: Double?
+    var usageWeekly: Double?
+    var usageMonthly: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case limit
+        case usage
+        case usageDaily = "usage_daily"
+        case usageWeekly = "usage_weekly"
+        case usageMonthly = "usage_monthly"
+    }
+}
+
 enum AegisError: Error, CustomStringConvertible {
     case message(String)
 
@@ -92,6 +131,9 @@ func run(_ args: [String]) throws {
         let config = try loadConfig()
         let models = try loadOpenRouterModels(args: args)
         printPriceWatch(config: config, models: models)
+    case "usage":
+        let config = try loadConfig()
+        try printUsage(config: config, args: Array(args.dropFirst()))
     case "key":
         try runKeyCommand(Array(args.dropFirst()))
     default:
@@ -108,6 +150,7 @@ func printHelp() {
       aegis status
       aegis export [env|json|codex|workbuddy] [--with-secrets]
       aegis price-watch [models.json]
+      aegis usage openrouter
       aegis key set <provider> <alias>
       aegis key list
       aegis key reveal <provider> <alias>
@@ -277,7 +320,12 @@ func printExport(_ config: AegisConfig, target: String, withSecrets: Bool) throw
 
 func keychainSecret(providerName: String, provider: ProviderConfig) throws -> String {
     let alias = provider.keyAlias ?? "default"
-    return try keychainReveal(provider: providerName, alias: alias)
+    do {
+        return try keychainReveal(provider: providerName, alias: alias)
+    } catch {
+        throw AegisError.message(
+            "missing Keychain key \(providerName)/\(alias); store it with: printf '%s' \"$\(provider.apiKeyEnv)\" | aegis key set \(providerName) \(alias)")
+    }
 }
 
 func shellQuote(_ value: String) -> String {
@@ -343,6 +391,93 @@ func printPriceWatch(config: AegisConfig, models: [OpenRouterModel]) {
             print("  -> \(model.id) saves \(Int(saving.rounded()))%")
         }
     }
+}
+
+func printUsage(config: AegisConfig, args: [String]) throws {
+    guard args.first == "openrouter" else {
+        throw AegisError.message("usage: aegis usage openrouter")
+    }
+    guard let provider = config.providers["openrouter"] else {
+        throw AegisError.message("openrouter provider is not configured")
+    }
+    let apiKey = try providerAPIKey(providerName: "openrouter", provider: provider)
+    let credits = try fetchOpenRouterCredits(baseURL: provider.baseURL, apiKey: apiKey)
+    let key = try? fetchOpenRouterKey(baseURL: provider.baseURL, apiKey: apiKey)
+
+    print("OpenRouter")
+    print("  balance: \(money(credits.data.balance))")
+    print("  total credits: \(money(credits.data.totalCredits))")
+    print("  total usage: \(money(credits.data.totalUsage)) (\(percent(credits.data.usedPercent)))")
+    if let key = key?.data {
+        if let daily = key.usageDaily { print("  today: \(money(daily))") }
+        if let weekly = key.usageWeekly { print("  week: \(money(weekly))") }
+        if let monthly = key.usageMonthly { print("  month: \(money(monthly))") }
+        if let limit = key.limit, let usage = key.usage {
+            print("  key limit: \(money(usage)) / \(money(limit))")
+        }
+    }
+}
+
+func providerAPIKey(providerName: String, provider: ProviderConfig) throws -> String {
+    for env in recognizedAPIKeyEnvs(providerName: providerName, provider: provider) {
+        if let raw = ProcessInfo.processInfo.environment[env]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty
+        {
+            return raw
+        }
+    }
+    return try keychainSecret(providerName: providerName, provider: provider)
+}
+
+func fetchOpenRouterCredits(baseURL: String, apiKey: String) throws -> OpenRouterCreditsResponse {
+    try fetchOpenRouter(path: "credits", baseURL: baseURL, apiKey: apiKey)
+}
+
+func fetchOpenRouterKey(baseURL: String, apiKey: String) throws -> OpenRouterKeyResponse {
+    try fetchOpenRouter(path: "key", baseURL: baseURL, apiKey: apiKey)
+}
+
+func fetchOpenRouter<T: Decodable>(path: String, baseURL: String, apiKey: String) throws -> T {
+    guard let url = URL(string: baseURL)?.appendingPathComponent(path) else {
+        throw AegisError.message("invalid OpenRouter base URL: \(baseURL)")
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.timeoutInterval = 15
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("Aegis", forHTTPHeaderField: "X-Title")
+
+    let data = try httpData(request)
+    return try JSONDecoder().decode(T.self, from: data)
+}
+
+func httpData(_ request: URLRequest) throws -> Data {
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: Result<(Data, URLResponse), Error>!
+    URLSession.shared.dataTask(with: request) { data, response, error in
+        if let error = error {
+            result = .failure(error)
+        } else {
+            result = .success((data ?? Data(), response ?? URLResponse()))
+        }
+        semaphore.signal()
+    }.resume()
+    semaphore.wait()
+
+    let (data, response) = try result.get()
+    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+        throw AegisError.message("HTTP \(http.statusCode)")
+    }
+    return data
+}
+
+func money(_ value: Double) -> String {
+    String(format: "$%.2f", value)
+}
+
+func percent(_ value: Double) -> String {
+    String(format: "%.1f%%", value)
 }
 
 func supports(_ model: OpenRouterModel, _ required: [String]) -> Bool {

@@ -61,6 +61,16 @@ AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis price-watch Fixtures/op
 
 This preview intentionally exports env-var references, not raw API keys.
 
+OpenRouter usage:
+
+```bash
+.build/aegis usage openrouter
+```
+
+The command reads `OPENROUTER_API_KEY` first, then falls back to the configured
+Keychain alias. It fetches `/credits` for balance and `/key` for daily, weekly,
+monthly, and key-limit usage when OpenRouter returns those fields.
+
 Secret export is explicit:
 
 ```bash
