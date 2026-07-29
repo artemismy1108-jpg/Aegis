@@ -5,7 +5,7 @@ APP_NAME := Aegis
 APP_DIR := $(BUILD_DIR)/$(APP_NAME).app
 APP_BIN := $(APP_DIR)/Contents/MacOS/$(APP_NAME)
 
-.PHONY: build app run-app smoke clean
+.PHONY: build app run-app install-app smoke clean
 
 build:
 	mkdir -p $(BUILD_DIR)
@@ -20,6 +20,9 @@ app: build
 
 run-app: app
 	open $(APP_DIR)
+
+install-app: app
+	cp -R $(APP_DIR) /Applications/$(APP_NAME).app
 
 smoke: build
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) setup

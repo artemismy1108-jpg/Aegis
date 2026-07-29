@@ -26,6 +26,13 @@ make app
 open .build/Aegis.app
 ```
 
+Install it into Applications:
+
+```bash
+make install-app
+open /Applications/Aegis.app
+```
+
 The preview menu bar app is intentionally thin: it shells out to the bundled
 `aegis` CLI for status, doctor, scan, OpenRouter usage, price-watch, and provider
 page shortcuts.
