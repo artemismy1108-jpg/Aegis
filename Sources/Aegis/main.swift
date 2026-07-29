@@ -9,6 +9,7 @@ struct AegisConfig: Codable {
 struct ProviderConfig: Codable {
     var baseURL: String
     var apiKeyEnv: String
+    var keyAlias: String?
     var defaultModel: String?
     var dashboardURL: String?
     var billingURL: String?
@@ -84,8 +85,9 @@ func run(_ args: [String]) throws {
         printStatus(config)
     case "export":
         let config = try loadConfig()
-        let target = args.dropFirst().first ?? "env"
-        try printExport(config, target: target)
+        let exportArgs = Array(args.dropFirst())
+        let target = exportArgs.first { !$0.hasPrefix("-") } ?? "env"
+        try printExport(config, target: target, withSecrets: exportArgs.contains("--with-secrets"))
     case "price-watch":
         let config = try loadConfig()
         let models = try loadOpenRouterModels(args: args)
@@ -104,7 +106,7 @@ func printHelp() {
     Usage:
       aegis init-sample
       aegis status
-      aegis export [env|json|codex|workbuddy]
+      aegis export [env|json|codex|workbuddy] [--with-secrets]
       aegis price-watch [models.json]
       aegis key set <provider> <alias>
       aegis key list
@@ -145,6 +147,7 @@ func writeSampleConfig() throws {
             "openai": ProviderConfig(
                 baseURL: "https://api.openai.com/v1",
                 apiKeyEnv: "OPENAI_API_KEY",
+                keyAlias: "personal",
                 defaultModel: "gpt-4.1",
                 dashboardURL: "https://platform.openai.com/usage",
                 billingURL: "https://platform.openai.com/settings/organization/billing/overview",
@@ -154,6 +157,7 @@ func writeSampleConfig() throws {
             "gemini": ProviderConfig(
                 baseURL: "https://generativelanguage.googleapis.com/v1beta",
                 apiKeyEnv: "GEMINI_API_KEY",
+                keyAlias: "personal",
                 defaultModel: "gemini-2.5-pro",
                 dashboardURL: "https://aistudio.google.com/",
                 billingURL: "https://console.cloud.google.com/billing",
@@ -163,6 +167,7 @@ func writeSampleConfig() throws {
             "openrouter": ProviderConfig(
                 baseURL: "https://openrouter.ai/api/v1",
                 apiKeyEnv: "OPENROUTER_API_KEY",
+                keyAlias: "personal",
                 defaultModel: "anthropic/claude-sonnet-4",
                 dashboardURL: "https://openrouter.ai/activity",
                 billingURL: "https://openrouter.ai/credits",
@@ -172,6 +177,7 @@ func writeSampleConfig() throws {
             "minimax": ProviderConfig(
                 baseURL: "https://api.minimax.chat/v1",
                 apiKeyEnv: "MINIMAX_API_KEY",
+                keyAlias: "personal",
                 defaultModel: "MiniMax-M1",
                 dashboardURL: "https://platform.minimaxi.com/",
                 billingURL: "https://platform.minimaxi.com/",
@@ -221,15 +227,19 @@ func recognizedAPIKeyEnvs(providerName: String, provider: ProviderConfig) -> [St
     }
 }
 
-func printExport(_ config: AegisConfig, target: String) throws {
+func printExport(_ config: AegisConfig, target: String, withSecrets: Bool) throws {
     switch target {
     case "env":
         for name in config.providers.keys.sorted() {
             guard let provider = config.providers[name] else { continue }
+            let value = withSecrets ? try keychainSecret(providerName: name, provider: provider) : ""
             print("# \(name)")
-            print("export \(provider.apiKeyEnv)=\"\"")
+            print("export \(provider.apiKeyEnv)=\(shellQuote(value))")
         }
     case "json":
+        if withSecrets {
+            throw AegisError.message("json export does not support --with-secrets; use env, codex, or workbuddy")
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         print(String(data: try encoder.encode(config), encoding: .utf8)!)
@@ -242,11 +252,30 @@ func printExport(_ config: AegisConfig, target: String) throws {
             print("model = \"\(profile.model)\"")
             print("base_url = \"\(provider.baseURL)\"")
             print("api_key_env = \"\(provider.apiKeyEnv)\"")
+            if withSecrets {
+                print("api_key = \"\(tomlEscape(try keychainSecret(providerName: profile.provider, provider: provider)))\"")
+            }
             print("")
         }
     default:
         throw AegisError.message("unknown export target '\(target)'")
     }
+}
+
+func keychainSecret(providerName: String, provider: ProviderConfig) throws -> String {
+    let alias = provider.keyAlias ?? "default"
+    return try keychainReveal(provider: providerName, alias: alias)
+}
+
+func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+func tomlEscape(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: "\\n")
 }
 
 func loadOpenRouterModels(args: [String]) throws -> [OpenRouterModel] {

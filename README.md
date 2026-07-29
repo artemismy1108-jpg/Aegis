@@ -61,6 +61,17 @@ AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis price-watch Fixtures/op
 
 This preview intentionally exports env-var references, not raw API keys.
 
+Secret export is explicit:
+
+```bash
+.build/aegis export codex --with-secrets
+.build/aegis export workbuddy --with-secrets
+.build/aegis export env --with-secrets
+```
+
+`--with-secrets` reads the provider's `keyAlias` from Keychain. Missing keys fail
+the export instead of producing a partial config.
+
 Keychain-backed local vault:
 
 ```bash
