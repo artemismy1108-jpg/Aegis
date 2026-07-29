@@ -129,14 +129,12 @@ final class AegisPanelController: NSViewController {
             priceArgs.append(priceFixturePath)
         }
         let prices = runAegis(priceArgs)
-        let scan = runAegis(["scan"])
 
         root.addArrangedSubview(titleBlock())
-        root.addArrangedSubview(section(title: "Connect Keys", body: connectKeysSummary(), maxLines: 3))
-        root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 4))
-        root.addArrangedSubview(section(title: "Usage", body: usage, maxLines: 4))
+        root.addArrangedSubview(section(title: "Model Status", body: modelStatusSummary(status: providerStatus, usage: usage), maxLines: 6))
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 3))
-        root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 3))
+        root.addArrangedSubview(section(title: "Connect Keys", body: connectKeysSummary(), maxLines: 2))
+        root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 3))
         root.addArrangedSubview(actionsGrid())
         view.layoutSubtreeIfNeeded()
         scrollView.contentView.scroll(to: .zero)
@@ -172,11 +170,53 @@ final class AegisPanelController: NSViewController {
 
     private func connectKeysSummary() -> String {
         """
-        Bind by storing API keys in macOS Keychain.
         Setup stores keys in macOS Keychain.
-        Copy Key puts the selected key on clipboard.
-        Usage shows remaining percent when available.
+        Copy Key copies the selected key to clipboard.
         """
+    }
+
+    private func modelStatusSummary(status: String, usage: String) -> String {
+        let statusMap = providerStatusMap(status)
+        let usageMap = providerUsageMap(usage)
+        return ["openai", "gemini", "openrouter", "minimax"].map { provider in
+            let state = statusMap[provider]?.ready == true ? "ON " : "OFF"
+            let model = statusMap[provider]?.model ?? "-"
+            let usageText = usageMap[provider] ?? "usage unavailable"
+            return "\(state) \(provider): \(model) | \(usageText)"
+        }.joined(separator: "\n")
+    }
+
+    private func providerStatusMap(_ status: String) -> [String: (ready: Bool, model: String)] {
+        var result: [String: (ready: Bool, model: String)] = [:]
+        for line in status.split(separator: "\n").map(String.init) {
+            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            let provider = parts[0]
+            let body = parts[1]
+            let ready = body.contains("ready")
+            let model = extractBetween(body, start: "model ", end: ",") ?? "-"
+            result[provider] = (ready, model)
+        }
+        return result
+    }
+
+    private func providerUsageMap(_ usage: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for line in usage.split(separator: "\n").map(String.init) {
+            let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            result[parts[0]] = parts[1].trimmingCharacters(in: .whitespaces)
+        }
+        return result
+    }
+
+    private func extractBetween(_ text: String, start: String, end: String) -> String? {
+        guard let startRange = text.range(of: start) else { return nil }
+        let rest = text[startRange.upperBound...]
+        if let endRange = rest.range(of: end) {
+            return String(rest[..<endRange.lowerBound])
+        }
+        return String(rest)
     }
 
     private func section(title: String, body: String, maxLines: Int) -> NSView {
