@@ -23,6 +23,7 @@ run-app: app
 	open $(APP_DIR)
 
 install-app: app
+	rm -rf /Applications/$(APP_NAME).app
 	cp -R $(APP_DIR) /Applications/$(APP_NAME).app
 
 smoke: build
