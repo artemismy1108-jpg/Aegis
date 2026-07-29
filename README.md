@@ -33,10 +33,10 @@ make install-app
 open /Applications/Aegis.app
 ```
 
-The preview menu bar app is intentionally thin: it shells out to the bundled
+The preview menu bar app uses an AppKit popover and shells out to the bundled
 `aegis` CLI for status, doctor, scan, OpenRouter usage, price-watch, and provider
-page shortcuts. The menu itself shows provider status, OpenRouter usage, price
-watch results, and config scan results inline, with action items below.
+page shortcuts. The panel shows provider status, OpenRouter usage, price watch
+results, and config scan results inline, with action buttons below.
 
 Store a key in macOS Keychain:
 

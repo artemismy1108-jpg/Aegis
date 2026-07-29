@@ -3,6 +3,9 @@ import Foundation
 
 final class AegisMenuApp: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let popover = NSPopover()
+    private lazy var controller = AegisPanelController(aegisPath: aegisPath, priceFixturePath: priceFixturePath)
+
     private var aegisPath: String {
         Bundle.main.path(forResource: "aegis", ofType: nil)
             ?? URL(fileURLWithPath: CommandLine.arguments[0])
@@ -10,6 +13,7 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
                 .appendingPathComponent("aegis")
                 .path
     }
+
     private var priceFixturePath: String? {
         Bundle.main.path(forResource: "openrouter-models.sample", ofType: "json")
     }
@@ -17,97 +21,185 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.title = "Aegis"
         statusItem.button?.target = self
-        statusItem.button?.action = #selector(showMenu)
-        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem.button?.action = #selector(togglePopover)
+
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 420, height: 640)
+        popover.contentViewController = controller
+        controller.refresh()
     }
 
-    @objc private func showMenu() {
-        let menu = NSMenu()
+    @objc private func togglePopover() {
+        if popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        controller.refresh()
         refreshStatusTitle()
-        addHeader("Aegis", to: menu)
-        menu.addItem(.separator())
+        if let button = statusItem.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
 
-        addOutputSection("Providers", ["status"], to: menu, maxLines: 6)
-        menu.addItem(.separator())
+    private func refreshStatusTitle() {
+        let ready = controller.providerStatus
+            .split(separator: "\n")
+            .filter { $0.contains("ready") }
+            .count
+        statusItem.button?.title = ready > 0 ? "Aegis \(ready)/4" : "Aegis"
+    }
+}
 
-        addOutputSection("OpenRouter Usage", ["usage", "openrouter"], to: menu, maxLines: 6)
-        menu.addItem(.separator())
+final class AegisPanelController: NSViewController {
+    private let aegisPath: String
+    private let priceFixturePath: String?
+    private let root = NSStackView()
 
+    private(set) var providerStatus = ""
+
+    init(aegisPath: String, priceFixturePath: String?) {
+        self.aegisPath = aegisPath
+        self.priceFixturePath = priceFixturePath
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 640))
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        root.orientation = .vertical
+        root.alignment = .leading
+        root.spacing = 12
+        root.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(root)
+
+        NSLayoutConstraint.activate([
+            root.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            root.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            root.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
+            root.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -16)
+        ])
+    }
+
+    func refresh() {
+        root.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        providerStatus = runAegis(["status"])
+        let usage = runAegis(["usage", "openrouter"])
         var priceArgs = ["price-watch"]
         if let priceFixturePath = priceFixturePath {
             priceArgs.append(priceFixturePath)
         }
-        addOutputSection("Price Watch", priceArgs, to: menu, maxLines: 5)
-        menu.addItem(.separator())
+        let prices = runAegis(priceArgs)
+        let scan = runAegis(["scan"])
 
-        addOutputSection("Config Scan", ["scan"], to: menu, maxLines: 8)
-        menu.addItem(.separator())
-
-        addCommand("Refresh", ["status"], to: menu)
-        addCommand("Doctor Details", ["doctor"], to: menu)
-        addCommand("Scan Suggestions", ["scan", "--suggest"], to: menu)
-        addOpenSubmenu(to: menu)
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit", action: #selector(quit), keyEquivalent: "q").target = self
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil
+        root.addArrangedSubview(titleBlock())
+        root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 6))
+        root.addArrangedSubview(section(title: "OpenRouter", body: usage, maxLines: 6))
+        root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 5))
+        root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 7))
+        root.addArrangedSubview(actionsGrid())
     }
 
-    private func addHeader(_ title: String, to menu: NSMenu) {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        menu.addItem(item)
+    private func titleBlock() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+
+        let title = label("Aegis", font: .systemFont(ofSize: 22, weight: .semibold))
+        let subtitle = label("LLM keys, spend, routes, and config", color: .secondaryLabelColor)
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(subtitle)
+        return stack
     }
 
-    private func addOutputSection(_ title: String, _ args: [String], to menu: NSMenu, maxLines: Int) {
-        addHeader(title, to: menu)
-        let output = runAegis(args)
-        let lines = output
+    private func section(title: String, body: String, maxLines: Int) -> NSView {
+        let box = NSBox()
+        box.boxType = .custom
+        box.cornerRadius = 8
+        box.borderWidth = 1
+        box.borderColor = NSColor.separatorColor
+        box.fillColor = NSColor.controlBackgroundColor
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.contentView?.addSubview(stack)
+
+        stack.addArrangedSubview(label(title, font: .systemFont(ofSize: 13, weight: .semibold)))
+
+        let lines = body
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map(String.init)
         let visible = lines.isEmpty ? ["No data"] : Array(lines.prefix(maxLines))
         for line in visible {
-            let item = NSMenuItem(title: "  \(line)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
+            stack.addArrangedSubview(label(line, font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: color(for: line)))
         }
         if lines.count > maxLines {
-            let item = NSMenuItem(title: "  ...", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
+            stack.addArrangedSubview(label("...", font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: .secondaryLabelColor))
         }
+
+        NSLayoutConstraint.activate([
+            box.widthAnchor.constraint(equalToConstant: 388),
+            stack.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 9),
+            stack.bottomAnchor.constraint(equalTo: box.contentView!.bottomAnchor, constant: -9)
+        ])
+
+        return box
     }
 
-    private func addCommand(_ title: String, _ args: [String], to menu: NSMenu) {
-        let item = NSMenuItem(title: title, action: #selector(runCommand(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = args
-        menu.addItem(item)
+    private func actionsGrid() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+
+        let row1 = buttonRow([
+            ("Refresh", { [weak self] in self?.refresh() }),
+            ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
+            ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) })
+        ])
+        let row2 = buttonRow([
+            ("OpenRouter Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
+            ("OpenAI Billing", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
+            ("Quit", { NSApp.terminate(nil) })
+        ])
+
+        stack.addArrangedSubview(row1)
+        stack.addArrangedSubview(row2)
+        return stack
     }
 
-    private func addOpenSubmenu(to menu: NSMenu) {
-        let parent = NSMenuItem(title: "Open Provider Page", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        for provider in ["openrouter", "openai", "gemini", "minimax"] {
-            for target in ["dashboard", "billing", "keys"] {
-                let item = NSMenuItem(
-                    title: "\(provider) \(target)",
-                    action: #selector(runCommand(_:)),
-                    keyEquivalent: "")
-                item.target = self
-                item.representedObject = ["open", provider, target]
-                submenu.addItem(item)
-            }
+    private func buttonRow(_ specs: [(String, () -> Void)]) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        for spec in specs {
+            let button = ClosureButton(title: spec.0, action: spec.1)
+            button.bezelStyle = .rounded
+            button.widthAnchor.constraint(equalToConstant: 124).isActive = true
+            row.addArrangedSubview(button)
         }
-        parent.submenu = submenu
-        menu.addItem(parent)
+        return row
     }
 
-    @objc private func runCommand(_ sender: NSMenuItem) {
-        guard let args = sender.representedObject as? [String] else { return }
-        let output = runAegis(args)
-        showOutput(title: sender.title, output: output)
+    private func showCommand(_ title: String, _ args: [String]) {
+        showOutput(title: title, output: runAegis(args))
+    }
+
+    private func runSilent(_ args: [String]) {
+        _ = runAegis(args)
     }
 
     private func runAegis(_ args: [String]) -> String {
@@ -139,17 +231,39 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
-    private func refreshStatusTitle() {
-        let output = runAegis(["status"])
-        let ready = output
-            .split(separator: "\n")
-            .filter { $0.contains("ready") }
-            .count
-        statusItem.button?.title = ready > 0 ? "Aegis \(ready)/4" : "Aegis"
+    private func label(_ text: String, font: NSFont = .systemFont(ofSize: 12), color: NSColor = .labelColor) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = font
+        field.textColor = color
+        field.lineBreakMode = .byTruncatingTail
+        field.maximumNumberOfLines = 1
+        return field
     }
 
-    @objc private func quit() {
-        NSApp.terminate(nil)
+    private func color(for line: String) -> NSColor {
+        if line.contains("ready") || line.contains("saves") { return .systemGreen }
+        if line.contains("missing") || line.contains("HTTP") || line.contains("aegis:") { return .systemRed }
+        return .labelColor
+    }
+}
+
+final class ClosureButton: NSButton {
+    private let closure: () -> Void
+
+    init(title: String, action: @escaping () -> Void) {
+        self.closure = action
+        super.init(frame: .zero)
+        self.title = title
+        self.target = self
+        self.action = #selector(run)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    @objc private func run() {
+        closure()
     }
 }
 
