@@ -4,8 +4,10 @@ BIN := $(BUILD_DIR)/aegis
 APP_NAME := Aegis
 APP_DIR := $(BUILD_DIR)/$(APP_NAME).app
 APP_BIN := $(APP_DIR)/Contents/MacOS/$(APP_NAME)
+DMG_DIR := $(BUILD_DIR)/dmg
+DMG := $(BUILD_DIR)/$(APP_NAME).dmg
 
-.PHONY: build app run-app install-app smoke clean
+.PHONY: build app run-app install-app dmg smoke clean
 
 build:
 	mkdir -p $(BUILD_DIR)
@@ -25,6 +27,13 @@ run-app: app
 install-app: app
 	rm -rf /Applications/$(APP_NAME).app
 	cp -R $(APP_DIR) /Applications/$(APP_NAME).app
+
+dmg: app
+	rm -rf $(DMG_DIR) $(DMG)
+	mkdir -p $(DMG_DIR)
+	cp -R $(APP_DIR) $(DMG_DIR)/$(APP_NAME).app
+	ln -s /Applications $(DMG_DIR)/Applications
+	hdiutil create -volname "$(APP_NAME)" -srcfolder $(DMG_DIR) -ov -format UDZO $(DMG)
 
 smoke: build
 	AEGIS_CONFIG=/private/tmp/aegis-smoke.json $(BIN) setup
