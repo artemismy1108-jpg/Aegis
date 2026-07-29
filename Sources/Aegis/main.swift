@@ -90,6 +90,8 @@ func run(_ args: [String]) throws {
         let config = try loadConfig()
         let models = try loadOpenRouterModels(args: args)
         printPriceWatch(config: config, models: models)
+    case "key":
+        try runKeyCommand(Array(args.dropFirst()))
     default:
         throw AegisError.message("unknown command '\(args.first!)'")
     }
@@ -104,6 +106,10 @@ func printHelp() {
       aegis status
       aegis export [env|json|codex|workbuddy]
       aegis price-watch [models.json]
+      aegis key set <provider> <alias>
+      aegis key list
+      aegis key reveal <provider> <alias>
+      aegis key delete <provider> <alias>
 
     Config:
       ~/.config/aegis/config.json
@@ -197,9 +203,21 @@ func writeSampleConfig() throws {
 func printStatus(_ config: AegisConfig) {
     for name in config.providers.keys.sorted() {
         guard let provider = config.providers[name] else { continue }
-        let keyState = ProcessInfo.processInfo.environment[provider.apiKeyEnv] == nil ? "missing env" : "env ready"
+        let envs = recognizedAPIKeyEnvs(providerName: name, provider: provider)
+        let keyState = envs.contains { ProcessInfo.processInfo.environment[$0] != nil } ? "env ready" : "missing env"
         let model = provider.defaultModel ?? "-"
-        print("\(name): \(keyState), model \(model), env \(provider.apiKeyEnv)")
+        print("\(name): \(keyState), model \(model), env \(envs.joined(separator: "|"))")
+    }
+}
+
+func recognizedAPIKeyEnvs(providerName: String, provider: ProviderConfig) -> [String] {
+    switch providerName {
+    case "openai":
+        return ["OPENAI_ADMIN_KEY", "OPENAI_API_KEY"]
+    case "minimax":
+        return ["MINIMAX_CODING_API_KEY", "MINIMAX_API_KEY"]
+    default:
+        return [provider.apiKeyEnv]
     }
 }
 
@@ -299,3 +317,109 @@ func savingPercent(currentCost: Double, candidateCost: Double) -> Double {
     return (currentCost - candidateCost) / currentCost * 100
 }
 
+func runKeyCommand(_ args: [String]) throws {
+    switch args.first {
+    case "set":
+        guard args.count == 3 else { throw AegisError.message("usage: aegis key set <provider> <alias>") }
+        let secret = readStdin().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !secret.isEmpty else {
+            throw AegisError.message("pipe the API key on stdin, e.g. printf '%s' \"$OPENROUTER_API_KEY\" | aegis key set openrouter personal")
+        }
+        try keychainSet(provider: args[1], alias: args[2], secret: secret)
+        print("stored \(args[1])/\(args[2]) in Keychain")
+    case "list":
+        try keychainList()
+    case "reveal":
+        guard args.count == 3 else { throw AegisError.message("usage: aegis key reveal <provider> <alias>") }
+        print(try keychainReveal(provider: args[1], alias: args[2]))
+    case "delete":
+        guard args.count == 3 else { throw AegisError.message("usage: aegis key delete <provider> <alias>") }
+        try keychainDelete(provider: args[1], alias: args[2])
+        print("deleted \(args[1])/\(args[2]) from Keychain")
+    default:
+        throw AegisError.message("usage: aegis key [set|list|reveal|delete]")
+    }
+}
+
+func readStdin() -> String {
+    String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? ""
+}
+
+func keychainService(provider: String) -> String {
+    "aegis.\(provider)"
+}
+
+func keychainRun(_ args: [String], input: String? = nil, allowFailure: Bool = false) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+    process.arguments = args
+
+    let output = Pipe()
+    let error = Pipe()
+    process.standardOutput = output
+    process.standardError = error
+
+    if let input = input {
+        let stdin = Pipe()
+        process.standardInput = stdin
+        try process.run()
+        stdin.fileHandleForWriting.write(Data(input.utf8))
+        try stdin.fileHandleForWriting.close()
+    } else {
+        try process.run()
+    }
+
+    process.waitUntilExit()
+    let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    if process.terminationStatus != 0, !allowFailure {
+        throw AegisError.message(stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    return stdout
+}
+
+func keychainSet(provider: String, alias: String, secret: String) throws {
+    _ = try keychainRun([
+        "add-generic-password",
+        "-U",
+        "-s", keychainService(provider: provider),
+        "-a", alias,
+        "-w", secret
+    ])
+}
+
+func keychainReveal(provider: String, alias: String) throws -> String {
+    try keychainRun([
+        "find-generic-password",
+        "-s", keychainService(provider: provider),
+        "-a", alias,
+        "-w"
+    ]).trimmingCharacters(in: .newlines)
+}
+
+func keychainDelete(provider: String, alias: String) throws {
+    _ = try keychainRun([
+        "delete-generic-password",
+        "-s", keychainService(provider: provider),
+        "-a", alias
+    ])
+}
+
+func keychainList() throws {
+    let providers = ["gemini", "minimax", "openai", "openrouter"]
+    var found = false
+    for provider in providers {
+        let output = try keychainRun([
+            "find-generic-password",
+            "-s", keychainService(provider: provider)
+        ], allowFailure: true)
+        for line in output.split(separator: "\n") where line.contains("\"acct\"") {
+            let alias = line
+                .replacingOccurrences(of: #"^\s*"acct"<blob>="#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            print("\(provider)/\(alias)")
+            found = true
+        }
+    }
+    if !found { print("no Aegis keys in Keychain") }
+}

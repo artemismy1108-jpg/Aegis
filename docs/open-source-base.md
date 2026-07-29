@@ -4,6 +4,9 @@
 
 Repository: `https://github.com/steipete/CodexBar`
 
+Local reference copy: `CodexBar/` is ignored by git and used only for upstream
+inspection.
+
 Why it is the best starting point:
 
 - macOS menu bar shape already exists
@@ -21,6 +24,13 @@ Expected Aegis changes:
 - Add Touch ID-gated key reveal/copy/export
 - Add Codex and WorkBuddy config exporters
 - Add OpenRouter price watch and cheaper route recommendations
+
+Upstream notes already adopted into the Aegis CLI:
+
+- OpenRouter uses `OPENROUTER_API_KEY` and base URL `https://openrouter.ai/api/v1`.
+- OpenAI should recognize both `OPENAI_ADMIN_KEY` and `OPENAI_API_KEY`.
+- MiniMax should recognize `MINIMAX_CODING_API_KEY` before `MINIMAX_API_KEY`.
+- OpenRouter usage can come from `/credits` and `/key`; price watch uses `/models`.
 
 ## Reference Projects
 
@@ -43,4 +53,3 @@ file discovery, but broader than the Aegis MVP.
 
 Start from CodexBar if it clones and builds cleanly. If it is too coupled, keep a
 small Aegis app and port only specific provider clients or CLI patterns.
-

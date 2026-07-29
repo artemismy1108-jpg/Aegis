@@ -60,3 +60,15 @@ AEGIS_CONFIG=/private/tmp/aegis-config.json .build/aegis price-watch Fixtures/op
 ```
 
 This preview intentionally exports env-var references, not raw API keys.
+
+Keychain-backed local vault:
+
+```bash
+printf '%s' "$OPENROUTER_API_KEY" | .build/aegis key set openrouter personal
+.build/aegis key list
+.build/aegis key reveal openrouter personal
+.build/aegis key delete openrouter personal
+```
+
+`key reveal` prints the secret, so use it only in a trusted terminal. The future
+menu bar app should gate reveal/copy/export with Touch ID or system password.
