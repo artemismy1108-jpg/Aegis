@@ -134,6 +134,9 @@ func run(_ args: [String]) throws {
     case "usage":
         let config = try loadConfig()
         try printUsage(config: config, args: Array(args.dropFirst()))
+    case "scan":
+        let config = try loadConfig()
+        printConfigScan(config)
     case "key":
         try runKeyCommand(Array(args.dropFirst()))
     default:
@@ -151,6 +154,7 @@ func printHelp() {
       aegis export [env|json|codex|workbuddy] [--with-secrets]
       aegis price-watch [models.json]
       aegis usage openrouter
+      aegis scan
       aegis key set <provider> <alias>
       aegis key list
       aegis key reveal <provider> <alias>
@@ -414,6 +418,32 @@ func printUsage(config: AegisConfig, args: [String]) throws {
         if let monthly = key.usageMonthly { print("  month: \(money(monthly))") }
         if let limit = key.limit, let usage = key.usage {
             print("  key limit: \(money(usage)) / \(money(limit))")
+        }
+    }
+}
+
+func printConfigScan(_ config: AegisConfig) {
+    let envsByProvider = Dictionary(uniqueKeysWithValues: config.providers.map { name, provider in
+        (name, recognizedAPIKeyEnvs(providerName: name, provider: provider))
+    })
+    let paths = Array(Set(config.providers.values.flatMap(\.configPaths))).sorted()
+
+    for rawPath in paths {
+        let path = NSString(string: rawPath).expandingTildeInPath
+        let exists = FileManager.default.fileExists(atPath: path)
+        guard exists else {
+            print("\(rawPath): missing")
+            continue
+        }
+
+        let text = (try? String(contentsOfFile: path)) ?? ""
+        let hits = envsByProvider
+            .flatMap { provider, envs in envs.filter { text.contains($0) }.map { "\(provider):\($0)" } }
+            .sorted()
+        if hits.isEmpty {
+            print("\(rawPath): exists")
+        } else {
+            print("\(rawPath): \(hits.joined(separator: ", "))")
         }
     }
 }

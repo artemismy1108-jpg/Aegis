@@ -71,6 +71,16 @@ The command reads `OPENROUTER_API_KEY` first, then falls back to the configured
 Keychain alias. It fetches `/credits` for balance and `/key` for daily, weekly,
 monthly, and key-limit usage when OpenRouter returns those fields.
 
+Local config scan:
+
+```bash
+.build/aegis scan
+```
+
+`scan` checks configured paths such as `~/.zshrc` and `~/.config/codex/config.toml`
+and reports which provider env names are mentioned. It never prints the env
+values.
+
 Secret export is explicit:
 
 ```bash
