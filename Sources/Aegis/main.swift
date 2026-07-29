@@ -210,10 +210,23 @@ func printStatus(_ config: AegisConfig) {
     for name in config.providers.keys.sorted() {
         guard let provider = config.providers[name] else { continue }
         let envs = recognizedAPIKeyEnvs(providerName: name, provider: provider)
-        let keyState = envs.contains { ProcessInfo.processInfo.environment[$0] != nil } ? "env ready" : "missing env"
+        let keyState = providerCredentialState(providerName: name, provider: provider, envs: envs)
         let model = provider.defaultModel ?? "-"
         print("\(name): \(keyState), model \(model), env \(envs.joined(separator: "|"))")
     }
+}
+
+func providerCredentialState(providerName: String, provider: ProviderConfig, envs: [String]) -> String {
+    if envs.contains(where: { ProcessInfo.processInfo.environment[$0] != nil }) {
+        return "env ready"
+    }
+
+    let alias = provider.keyAlias ?? "default"
+    if keychainHasKey(provider: providerName, alias: alias) {
+        return "keychain ready (\(alias))"
+    }
+
+    return "missing key"
 }
 
 func recognizedAPIKeyEnvs(providerName: String, provider: ProviderConfig) -> [String] {
@@ -432,6 +445,14 @@ func keychainDelete(provider: String, alias: String) throws {
         "-s", keychainService(provider: provider),
         "-a", alias
     ])
+}
+
+func keychainHasKey(provider: String, alias: String) -> Bool {
+    (try? keychainRun([
+        "find-generic-password",
+        "-s", keychainService(provider: provider),
+        "-a", alias
+    ], allowFailure: true)).map { !$0.isEmpty } ?? false
 }
 
 func keychainList() throws {
