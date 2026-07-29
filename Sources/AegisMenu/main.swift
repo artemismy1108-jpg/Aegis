@@ -3,10 +3,8 @@ import Foundation
 
 final class AegisMenuApp: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let menu = NSMenu()
-    private var providerStatus = ""
-    private var openRouterUsage = ""
-    private var priceWatch = ""
+    private let popover = NSPopover()
+    private var controller: AegisPanelController?
 
     private var aegisPath: String {
         Bundle.main.path(forResource: "aegis", ofType: nil)
@@ -22,91 +20,134 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.title = "Aegis"
-        statusItem.menu = menu
-        refreshData()
-        rebuildMenu()
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(togglePopover)
+
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 400, height: 460)
+        replacePanelContent()
     }
 
-    private func refreshData() {
+    @objc private func togglePopover() {
+        if popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        replacePanelContent()
+        refreshStatusTitle()
+        if let button = statusItem.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+
+    private func replacePanelContent() {
+        let nextController = AegisPanelController(
+            aegisPath: aegisPath,
+            priceFixturePath: priceFixturePath,
+            onRefresh: { [weak self] in
+                DispatchQueue.main.async {
+                    self?.replacePanelContent()
+                    self?.refreshStatusTitle()
+                }
+            }
+        )
+        nextController.refresh()
+        controller = nextController
+        popover.contentViewController = nextController
+    }
+
+    private func refreshStatusTitle() {
+        let ready = controller?.providerStatus
+            .split(separator: "\n")
+            .filter { $0.contains("ready") }
+            .count ?? 0
+        statusItem.button?.title = ready > 0 ? "Aegis \(ready)/4" : "Aegis"
+    }
+}
+
+final class AegisPanelController: NSViewController {
+    private let aegisPath: String
+    private let priceFixturePath: String?
+    private let onRefresh: () -> Void
+    private let root = NSStackView()
+    private let scrollView = NSScrollView()
+
+    private(set) var providerStatus = ""
+
+    init(aegisPath: String, priceFixturePath: String?, onRefresh: @escaping () -> Void) {
+        self.aegisPath = aegisPath
+        self.priceFixturePath = priceFixturePath
+        self.onRefresh = onRefresh
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 460))
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scrollView)
+
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = document
+
+        root.orientation = .vertical
+        root.alignment = .leading
+        root.spacing = 10
+        root.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(root)
+
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            root.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 14),
+            root.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -14),
+            root.topAnchor.constraint(equalTo: document.topAnchor, constant: 14),
+            root.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -14)
+        ])
+    }
+
+    func refresh() {
+        clearRoot()
+
         ensureConfig()
         providerStatus = runAegis(["status"])
-        openRouterUsage = runAegis(["usage", "openrouter"])
+        let usage = runAegis(["usage", "openrouter"])
         var priceArgs = ["price-watch"]
         if let priceFixturePath = priceFixturePath {
             priceArgs.append(priceFixturePath)
         }
-        priceWatch = runAegis(priceArgs)
-        refreshStatusTitle()
+        let prices = runAegis(priceArgs)
+        let scan = runAegis(["scan"])
+
+        root.addArrangedSubview(titleBlock())
+        root.addArrangedSubview(section(title: "Connect Keys", body: connectKeysSummary(), maxLines: 3))
+        root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 4))
+        root.addArrangedSubview(section(title: "OpenRouter", body: usage, maxLines: 3))
+        root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 3))
+        root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 3))
+        root.addArrangedSubview(actionsGrid())
+        view.layoutSubtreeIfNeeded()
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    private func refreshStatusTitle() {
-        let ready = providerStatus
-            .split(separator: "\n")
-            .filter { $0.contains("ready") }
-            .count
-        statusItem.button?.title = ready > 0 ? "Aegis \(ready)/4" : "Aegis"
-    }
-
-    private func rebuildMenu() {
-        menu.removeAllItems()
-
-        addDisabled("Aegis")
-        addDisabled("LLM keys, spend, routes, and config")
-        menu.addItem(.separator())
-
-        addDisabled("Connect Keys")
-        addDisabled("Use Setup to store API keys in macOS Keychain.")
-        addDisabled("OpenRouter balance works after adding its key.")
-        menu.addItem(.separator())
-
-        addSection(title: "Providers", body: providerStatus, limit: 6)
-        addSection(title: "OpenRouter", body: openRouterUsage, limit: 4)
-        addSection(title: "Price Watch", body: priceWatch, limit: 4)
-        menu.addItem(.separator())
-
-        addAction("Setup / Add API Keys", #selector(setupAction))
-        addAction("Refresh", #selector(refreshAction))
-        addAction("Doctor", #selector(doctorAction))
-        addAction("Scan Config", #selector(scanAction))
-        menu.addItem(.separator())
-
-        addAction("Copy Codex Config", #selector(copyCodexAction))
-        addAction("Copy Bind Commands", #selector(copyBindCommandsAction))
-        menu.addItem(.separator())
-
-        addAction("OpenRouter Keys", #selector(openRouterKeysAction))
-        addAction("OpenAI Billing", #selector(openAIBillingAction))
-        addAction("Gemini Keys", #selector(geminiKeysAction))
-        addAction("MiniMax Dashboard", #selector(minimaxAction))
-        menu.addItem(.separator())
-
-        addAction("Quit Aegis", #selector(quitAction))
-    }
-
-    private func addSection(title: String, body: String, limit: Int) {
-        addDisabled(title)
-        let lines = body
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .map(String.init)
-        for line in Array(lines.prefix(limit)) {
-            addDisabled("  \(line)")
+    private func clearRoot() {
+        for view in root.arrangedSubviews {
+            root.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
-        if lines.count > limit {
-            addDisabled("  ...")
-        }
-        menu.addItem(.separator())
-    }
-
-    private func addDisabled(_ title: String) {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        menu.addItem(item)
-    }
-
-    private func addAction(_ title: String, _ action: Selector) {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
     }
 
     private func ensureConfig() {
@@ -116,7 +157,119 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func setupAction() {
+    private func titleBlock() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+
+        let title = label("Aegis", font: .systemFont(ofSize: 20, weight: .semibold))
+        let subtitle = label("LLM keys, spend, routes, and config", color: .secondaryLabelColor)
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(subtitle)
+        return stack
+    }
+
+    private func connectKeysSummary() -> String {
+        """
+        Bind by storing API keys in macOS Keychain.
+        OpenRouter balance works after OPENROUTER_API_KEY.
+        OpenAI/Gemini/MiniMax currently link to billing pages.
+        Use Bind Keys to copy setup commands.
+        """
+    }
+
+    private func section(title: String, body: String, maxLines: Int) -> NSView {
+        let box = NSBox()
+        box.boxType = .custom
+        box.cornerRadius = 8
+        box.borderWidth = 1
+        box.borderColor = NSColor.separatorColor
+        box.fillColor = NSColor.controlBackgroundColor
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.contentView?.addSubview(stack)
+
+        stack.addArrangedSubview(label(title, font: .systemFont(ofSize: 13, weight: .semibold)))
+
+        let lines = body
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        let visible = lines.isEmpty ? ["No data"] : Array(lines.prefix(maxLines))
+        for line in visible {
+            stack.addArrangedSubview(label(line, font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: color(for: line)))
+        }
+        if lines.count > maxLines {
+            stack.addArrangedSubview(label("...", font: .monospacedSystemFont(ofSize: 11, weight: .regular), color: .secondaryLabelColor))
+        }
+
+        NSLayoutConstraint.activate([
+            box.widthAnchor.constraint(equalToConstant: 372),
+            stack.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 9),
+            stack.bottomAnchor.constraint(equalTo: box.contentView!.bottomAnchor, constant: -9)
+        ])
+
+        return box
+    }
+
+    private func actionsGrid() -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+
+        let row1 = buttonRow([
+            ("Refresh", { [weak self] in self?.onRefresh() }),
+            ("Setup", { [weak self] in self?.setupAndRefresh() }),
+            ("Bind Keys", { [weak self] in self?.copyBindKeyCommands() }),
+        ])
+        let row2 = buttonRow([
+            ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
+            ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) }),
+            ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) })
+        ])
+        let row3 = buttonRow([
+            ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
+            ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
+            ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) })
+        ])
+        let row4 = buttonRow([
+            ("MiniMax", { [weak self] in self?.runSilent(["open", "minimax", "dashboard"]) }),
+            ("Quit", { NSApp.terminate(nil) })
+        ])
+
+        stack.addArrangedSubview(row1)
+        stack.addArrangedSubview(row2)
+        stack.addArrangedSubview(row3)
+        stack.addArrangedSubview(row4)
+        return stack
+    }
+
+    private func buttonRow(_ specs: [(String, () -> Void)]) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        for spec in specs {
+            let button = ClosureButton(title: spec.0, action: spec.1)
+            button.bezelStyle = .rounded
+            button.widthAnchor.constraint(equalToConstant: 118).isActive = true
+            row.addArrangedSubview(button)
+        }
+        return row
+    }
+
+    private func showCommand(_ title: String, _ args: [String]) {
+        showOutput(title: title, output: runAegis(args))
+    }
+
+    private func setupAndRefresh() {
         let setupOutput = runAegis(["setup"])
         var stored: [String] = []
         var errors: [String] = []
@@ -144,56 +297,7 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
             summary += "\n\nNo keys were added. You can run Setup again later."
         }
         showOutput(title: "Setup Complete", output: summary)
-        refreshAction()
-    }
-
-    @objc private func refreshAction() {
-        refreshData()
-        rebuildMenu()
-    }
-
-    @objc private func doctorAction() {
-        showOutput(title: "Doctor", output: runAegis(["doctor"]))
-    }
-
-    @objc private func scanAction() {
-        showOutput(title: "Scan Config", output: runAegis(["scan", "--suggest"]))
-    }
-
-    @objc private func copyCodexAction() {
-        copyOutput(title: "Copy Codex Config", args: ["export", "codex"])
-    }
-
-    @objc private func copyBindCommandsAction() {
-        let commands = """
-        printf '%s' "$OPENAI_API_KEY" | aegis key set openai personal
-        printf '%s' "$GEMINI_API_KEY" | aegis key set gemini personal
-        printf '%s' "$OPENROUTER_API_KEY" | aegis key set openrouter personal
-        printf '%s' "$MINIMAX_API_KEY" | aegis key set minimax personal
-        """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(commands, forType: .string)
-        showOutput(title: "Copy Bind Commands", output: "Copied Keychain setup commands to clipboard.")
-    }
-
-    @objc private func openRouterKeysAction() {
-        _ = runAegis(["open", "openrouter", "keys"])
-    }
-
-    @objc private func openAIBillingAction() {
-        _ = runAegis(["open", "openai", "billing"])
-    }
-
-    @objc private func geminiKeysAction() {
-        _ = runAegis(["open", "gemini", "keys"])
-    }
-
-    @objc private func minimaxAction() {
-        _ = runAegis(["open", "minimax", "dashboard"])
-    }
-
-    @objc private func quitAction() {
-        NSApp.terminate(nil)
+        onRefresh()
     }
 
     private func setupProviders() -> [(name: String, displayName: String, keyURLArg: [String])] {
@@ -226,18 +330,34 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
                 }
                 NSSound.beep()
             } else if response == .alertThirdButtonReturn {
-                _ = runAegis(provider.keyURLArg)
+                runSilent(provider.keyURLArg)
             } else {
                 return nil
             }
         }
     }
 
-    private func copyOutput(title: String, args: [String]) {
+    private func copyBindKeyCommands() {
+        let commands = """
+        printf '%s' "$OPENAI_API_KEY" | aegis key set openai personal
+        printf '%s' "$GEMINI_API_KEY" | aegis key set gemini personal
+        printf '%s' "$OPENROUTER_API_KEY" | aegis key set openrouter personal
+        printf '%s' "$MINIMAX_API_KEY" | aegis key set minimax personal
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(commands, forType: .string)
+        showOutput(title: "Bind Keys", output: "Copied Keychain setup commands to clipboard. Paste them in Terminal after exporting each provider API key.")
+    }
+
+    private func runSilent(_ args: [String]) {
+        _ = runAegis(args)
+    }
+
+    private func copyCommand(_ args: [String]) {
         let output = runAegis(args)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(output, forType: .string)
-        showOutput(title: title, output: output.isEmpty ? "No output" : "Copied to clipboard.")
+        showOutput(title: "Copied", output: output.isEmpty ? "No output" : "Copied to clipboard.")
     }
 
     private func runAegis(_ args: [String], input: String? = nil) -> String {
@@ -276,6 +396,45 @@ final class AegisMenuApp: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
+
+    private func label(_ text: String, font: NSFont = .systemFont(ofSize: 12), color: NSColor = .labelColor) -> NSTextField {
+        let field = NSTextField(labelWithString: text)
+        field.font = font
+        field.textColor = color
+        field.lineBreakMode = .byTruncatingTail
+        field.maximumNumberOfLines = 1
+        return field
+    }
+
+    private func color(for line: String) -> NSColor {
+        if line.contains("ready") || line.contains("saves") { return .systemGreen }
+        if line.contains("missing") || line.contains("HTTP") || line.contains("aegis:") { return .systemRed }
+        return .labelColor
+    }
+}
+
+final class ClosureButton: NSButton {
+    private let closure: () -> Void
+
+    init(title: String, action: @escaping () -> Void) {
+        self.closure = action
+        super.init(frame: .zero)
+        self.title = title
+        self.target = self
+        self.action = #selector(run)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    @objc private func run() {
+        closure()
+    }
+}
+
+final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
 
 let app = NSApplication.shared
