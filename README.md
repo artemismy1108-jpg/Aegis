@@ -6,6 +6,31 @@ It is planned as a pragmatic fork/adaptation of existing open-source macOS LLM
 usage monitors, with CodexBar as the preferred base once the upstream repository
 is available locally.
 
+Current preview is a small CLI core that already handles local setup, Keychain
+storage, safe and secret config export, OpenRouter usage, price-watch, config
+scanning, and provider page shortcuts. The macOS menu bar app can build on this
+core once the SwiftUI shell is ready.
+
+## Quick Start
+
+```bash
+make build
+.build/aegis setup
+.build/aegis doctor
+```
+
+Store a key in macOS Keychain:
+
+```bash
+printf '%s' "$OPENROUTER_API_KEY" | .build/aegis key set openrouter personal
+```
+
+Export a safe Codex config:
+
+```bash
+.build/aegis export codex
+```
+
 ## MVP Scope
 
 - Providers: OpenAI, Gemini, OpenRouter, MiniMax
