@@ -89,6 +89,7 @@ final class AegisPanelController: NSViewController {
     func refresh() {
         root.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
+        ensureConfig()
         providerStatus = runAegis(["status"])
         let usage = runAegis(["usage", "openrouter"])
         var priceArgs = ["price-watch"]
@@ -104,6 +105,13 @@ final class AegisPanelController: NSViewController {
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 5))
         root.addArrangedSubview(section(title: "Config Scan", body: scan, maxLines: 7))
         root.addArrangedSubview(actionsGrid())
+    }
+
+    private func ensureConfig() {
+        let status = runAegis(["status"])
+        if status.contains("missing config") {
+            _ = runAegis(["setup"])
+        }
     }
 
     private func titleBlock() -> NSView {

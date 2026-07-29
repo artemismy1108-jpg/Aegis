@@ -179,7 +179,9 @@ func configURL() -> URL {
     if let override = ProcessInfo.processInfo.environment["AEGIS_CONFIG"] {
         return URL(fileURLWithPath: NSString(string: override).expandingTildeInPath)
     }
-    let home = FileManager.default.homeDirectoryForCurrentUser
+    let home = ProcessInfo.processInfo.environment["HOME"]
+        .map { URL(fileURLWithPath: $0) }
+        ?? FileManager.default.homeDirectoryForCurrentUser
     return home.appendingPathComponent(".config/aegis/config.json")
 }
 
