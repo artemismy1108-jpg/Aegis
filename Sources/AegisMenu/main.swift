@@ -191,11 +191,11 @@ final class AegisPanelController: NSViewController {
         let usageMap = providerUsageMap(usage)
         let preferred = ["openai", "gemini", "openrouter", "minimax"]
         let dynamic = statusMap.keys.sorted()
-        let providers = Array((preferred + dynamic).reduce(into: [String]()) { result, provider in
+        let providers = (preferred + dynamic).reduce(into: [String]()) { result, provider in
             if !result.contains(provider), statusMap[provider] != nil {
                 result.append(provider)
             }
-        }.prefix(4))
+        }
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -441,7 +441,11 @@ final class AegisPanelController: NSViewController {
         guard !normalized.isEmpty else { return }
 
         let defaultEnv = "\(normalized.uppercased())_API_KEY"
-        guard let env = promptText(title: "Add Provider", message: "API key environment variable", placeholder: defaultEnv) else { return }
+        guard let env = promptText(title: "Add Provider", message: "API key environment variable, not the key itself", placeholder: defaultEnv) else { return }
+        if env.contains("sk-") || env.count > 80 || env.contains("-") {
+            showOutput(title: "Add Provider", output: "That looks like an API key. Use an env name like \(defaultEnv), then paste the actual key in the next secure prompt.")
+            return
+        }
         guard let baseURL = promptText(title: "Add Provider", message: "Base URL", placeholder: "https://api.moonshot.cn/v1") else { return }
         guard let model = promptText(title: "Add Provider", message: "Default model", placeholder: "kimi-k2") else { return }
 
