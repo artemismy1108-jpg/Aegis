@@ -620,8 +620,11 @@ func providerUsageLine(providerName: String, provider: ProviderConfig) -> String
             return "openrouter: missing key or usage unavailable"
         }
     case "openai":
+        if let codexRemaining = latestCodexRemainingPercent() {
+            return "openai: \(percent(codexRemaining)) remaining, codex local"
+        }
         if let manualRemaining = provider.manualRemainingPercent {
-            return "openai: \(percent(manualRemaining)) remaining, codex manual"
+            return "openai: \(percent(manualRemaining)) remaining, codex fallback"
         }
         let budget = (provider.monthlyBudgetUSD ?? 100)
         guard budget > 0 else { return "openai: invalid monthlyBudgetUSD" }
@@ -658,6 +661,56 @@ func openAIUsedThisMonth(provider: ProviderConfig) -> Result<Double, Error> {
 func remainingPercent(limit: Double, used: Double) -> Double {
     guard limit > 0 else { return 0 }
     return max(0, min(100, (limit - used) / limit * 100))
+}
+
+func latestCodexRemainingPercent() -> Double? {
+    let home = ProcessInfo.processInfo.environment["HOME"]
+        .map { URL(fileURLWithPath: $0) }
+        ?? FileManager.default.homeDirectoryForCurrentUser
+    let sessionsURL = home.appendingPathComponent(".codex/sessions")
+    guard let enumerator = FileManager.default.enumerator(
+        at: sessionsURL,
+        includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles]
+    ) else {
+        return nil
+    }
+
+    var best: (timestamp: String, usedPercent: Double)?
+    for case let fileURL as URL in enumerator where fileURL.pathExtension == "jsonl" {
+        guard let text = tailText(fileURL, maxBytes: 512 * 1024) else { continue }
+        for line in text.split(separator: "\n").map(String.init) {
+            guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let timestamp = record["timestamp"] as? String,
+                  let payload = record["payload"] as? [String: Any],
+                  let type = payload["type"] as? String,
+                  type == "token_count",
+                  let rateLimits = payload["rate_limits"] as? [String: Any],
+                  let limitID = rateLimits["limit_id"] as? String,
+                  limitID == "codex",
+                  let primary = rateLimits["primary"] as? [String: Any],
+                  let usedPercent = primary["used_percent"] as? Double
+            else {
+                continue
+            }
+            if best == nil || timestamp > best!.timestamp {
+                best = (timestamp, usedPercent)
+            }
+        }
+    }
+
+    guard let used = best?.usedPercent else { return nil }
+    return max(0, min(100, 100 - used))
+}
+
+func tailText(_ url: URL, maxBytes: UInt64) -> String? {
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? handle.close() }
+    let size = (try? handle.seekToEnd()) ?? 0
+    let offset = size > maxBytes ? size - maxBytes : 0
+    try? handle.seek(toOffset: offset)
+    let data = handle.readDataToEndOfFile()
+    return String(data: data, encoding: .utf8)
 }
 
 func printConfigScan(_ config: AegisConfig, suggest: Bool) {
