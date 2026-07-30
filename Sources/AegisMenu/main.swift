@@ -351,14 +351,14 @@ final class AegisPanelController: NSViewController {
         stack.spacing = 8
 
         let row1 = buttonRow([
-            ("Refresh", { [weak self] in self?.onRefresh() }),
-            ("Setup", { [weak self] in self?.setupAndRefresh() }),
             ("Copy Key", { [weak self] in self?.copyAPIKey() }),
+            ("Update Key", { [weak self] in self?.updateAPIKey() }),
+            ("Delete Key", { [weak self] in self?.deleteAPIKey() }),
         ])
         let row2 = buttonRow([
-            ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
+            ("Refresh", { [weak self] in self?.onRefresh() }),
+            ("Setup", { [weak self] in self?.setupAndRefresh() }),
             ("Add Provider", { [weak self] in self?.addProvider() }),
-            ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) })
         ])
         let row3 = buttonRow([
             ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
@@ -522,27 +522,7 @@ final class AegisPanelController: NSViewController {
     }
 
     private func copyAPIKey() {
-        let providers = providerStatusMap(runAegis(["status"])).keys.sorted()
-        guard !providers.isEmpty else {
-            showOutput(title: "Copy API Key", output: "No providers configured.")
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Copy API Key"
-        alert.informativeText = "Choose one key to copy directly to clipboard."
-        alert.addButton(withTitle: "Copy")
-        alert.addButton(withTitle: "Cancel")
-
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26), pullsDown: false)
-        popup.addItems(withTitles: providers)
-        alert.accessoryView = popup
-
-        guard alert.runModal() == .alertFirstButtonReturn,
-              let provider = popup.selectedItem?.title
-        else {
-            return
-        }
+        guard let provider = chooseProvider(title: "Copy API Key", actionTitle: "Copy", message: "Choose one key to copy directly to clipboard.") else { return }
 
         let key = runAegis(["key", "reveal", provider, "personal"])
         guard !key.isEmpty, !key.hasPrefix("aegis:") else {
@@ -553,6 +533,49 @@ final class AegisPanelController: NSViewController {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(key, forType: .string)
         showOutput(title: "Copy API Key", output: "\(provider) API key copied to clipboard.")
+    }
+
+    private func updateAPIKey() {
+        guard let provider = chooseProvider(title: "Update API Key", actionTitle: "Update", message: "Choose the provider whose key should be replaced.") else { return }
+        guard let secret = promptForAPIKey(provider: (provider, provider.capitalized, [])) else { return }
+        let output = runAegis(["key", "set", provider, "personal"], input: secret)
+        showOutput(title: "Update API Key", output: output.isEmpty ? "\(provider) key updated." : output)
+        onRefresh()
+    }
+
+    private func deleteAPIKey() {
+        guard let provider = chooseProvider(title: "Delete API Key", actionTitle: "Delete", message: "Choose the provider key to delete from macOS Keychain.") else { return }
+        let confirm = NSAlert()
+        confirm.messageText = "Delete \(provider) API Key?"
+        confirm.informativeText = "This removes the Keychain item aegis.\(provider)/personal. It does not edit your provider config."
+        confirm.addButton(withTitle: "Delete")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        let output = runAegis(["key", "delete", provider, "personal"])
+        showOutput(title: "Delete API Key", output: output.isEmpty ? "\(provider) key deleted." : output)
+        onRefresh()
+    }
+
+    private func chooseProvider(title: String, actionTitle: String, message: String) -> String? {
+        let providers = providerStatusMap(runAegis(["status"])).keys.sorted()
+        guard !providers.isEmpty else {
+            showOutput(title: title, output: "No providers configured.")
+            return nil
+        }
+
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: actionTitle)
+        alert.addButton(withTitle: "Cancel")
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26), pullsDown: false)
+        popup.addItems(withTitles: providers)
+        alert.accessoryView = popup
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        return popup.selectedItem?.title
     }
 
     private func runSilent(_ args: [String]) {
