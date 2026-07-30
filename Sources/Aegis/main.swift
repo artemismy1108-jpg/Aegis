@@ -13,6 +13,7 @@ struct ProviderConfig: Codable {
     var defaultModel: String?
     var monthlyBudgetUSD: Double?
     var manualUsedUSD: Double?
+    var manualRemainingPercent: Double?
     var dashboardURL: String?
     var billingURL: String?
     var keyURL: String?
@@ -231,6 +232,7 @@ func writeSampleConfig() throws {
                 defaultModel: "gpt-4.1",
                 monthlyBudgetUSD: 100,
                 manualUsedUSD: nil,
+                manualRemainingPercent: nil,
                 dashboardURL: "https://platform.openai.com/usage",
                 billingURL: "https://platform.openai.com/settings/organization/billing/overview",
                 keyURL: "https://platform.openai.com/api-keys",
@@ -243,6 +245,7 @@ func writeSampleConfig() throws {
                 defaultModel: "gemini-2.5-pro",
                 monthlyBudgetUSD: nil,
                 manualUsedUSD: nil,
+                manualRemainingPercent: nil,
                 dashboardURL: "https://aistudio.google.com/",
                 billingURL: "https://console.cloud.google.com/billing",
                 keyURL: "https://aistudio.google.com/app/apikey",
@@ -255,6 +258,7 @@ func writeSampleConfig() throws {
                 defaultModel: "anthropic/claude-sonnet-4",
                 monthlyBudgetUSD: nil,
                 manualUsedUSD: nil,
+                manualRemainingPercent: nil,
                 dashboardURL: "https://openrouter.ai/activity",
                 billingURL: "https://openrouter.ai/credits",
                 keyURL: "https://openrouter.ai/settings/keys",
@@ -267,6 +271,7 @@ func writeSampleConfig() throws {
                 defaultModel: "MiniMax-M1",
                 monthlyBudgetUSD: 100,
                 manualUsedUSD: 0,
+                manualRemainingPercent: nil,
                 dashboardURL: "https://platform.minimaxi.com/",
                 billingURL: "https://platform.minimaxi.com/",
                 keyURL: "https://platform.minimaxi.com/",
@@ -615,6 +620,9 @@ func providerUsageLine(providerName: String, provider: ProviderConfig) -> String
             return "openrouter: missing key or usage unavailable"
         }
     case "openai":
+        if let manualRemaining = provider.manualRemainingPercent {
+            return "openai: \(percent(manualRemaining)) remaining, codex manual"
+        }
         let budget = (provider.monthlyBudgetUSD ?? 100)
         guard budget > 0 else { return "openai: invalid monthlyBudgetUSD" }
         let used = openAIUsedThisMonth(provider: provider)
@@ -864,6 +872,7 @@ func runProviderCommand(_ args: [String]) throws {
             defaultModel: model,
             monthlyBudgetUSD: nil,
             manualUsedUSD: nil,
+            manualRemainingPercent: nil,
             dashboardURL: nil,
             billingURL: nil,
             keyURL: nil,
