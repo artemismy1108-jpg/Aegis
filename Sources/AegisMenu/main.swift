@@ -522,27 +522,25 @@ final class AegisPanelController: NSViewController {
     }
 
     private func copyAPIKey() {
+        let providers = providerStatusMap(runAegis(["status"])).keys.sorted()
+        guard !providers.isEmpty else {
+            showOutput(title: "Copy API Key", output: "No providers configured.")
+            return
+        }
+
         let alert = NSAlert()
         alert.messageText = "Copy API Key"
         alert.informativeText = "Choose one key to copy directly to clipboard."
-        alert.addButton(withTitle: "OpenAI")
-        alert.addButton(withTitle: "Gemini")
-        alert.addButton(withTitle: "OpenRouter")
-        alert.addButton(withTitle: "MiniMax")
+        alert.addButton(withTitle: "Copy")
         alert.addButton(withTitle: "Cancel")
 
-        let response = alert.runModal()
-        let provider: String
-        switch response {
-        case .alertFirstButtonReturn:
-            provider = "openai"
-        case .alertSecondButtonReturn:
-            provider = "gemini"
-        case .alertThirdButtonReturn:
-            provider = "openrouter"
-        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
-            provider = "minimax"
-        default:
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26), pullsDown: false)
+        popup.addItems(withTitles: providers)
+        alert.accessoryView = popup
+
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let provider = popup.selectedItem?.title
+        else {
             return
         }
 
