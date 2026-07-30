@@ -131,7 +131,7 @@ final class AegisPanelController: NSViewController {
         let prices = runAegis(priceArgs)
 
         root.addArrangedSubview(titleBlock())
-        root.addArrangedSubview(section(title: "Model Status", body: modelStatusSummary(status: providerStatus, usage: usage), maxLines: 6))
+        root.addArrangedSubview(providerGrid(status: providerStatus, usage: usage))
         root.addArrangedSubview(section(title: "Price Watch", body: prices, maxLines: 3))
         root.addArrangedSubview(section(title: "Connect Keys", body: connectKeysSummary(), maxLines: 2))
         root.addArrangedSubview(section(title: "Providers", body: providerStatus, maxLines: 3))
@@ -184,6 +184,92 @@ final class AegisPanelController: NSViewController {
             let usageText = usageMap[provider] ?? "usage unavailable"
             return "\(state) \(provider): \(model) | \(usageText)"
         }.joined(separator: "\n")
+    }
+
+    private func providerGrid(status: String, usage: String) -> NSView {
+        let statusMap = providerStatusMap(status)
+        let usageMap = providerUsageMap(usage)
+        let preferred = ["openai", "gemini", "openrouter", "minimax"]
+        let dynamic = statusMap.keys.sorted()
+        let providers = Array((preferred + dynamic).reduce(into: [String]()) { result, provider in
+            if !result.contains(provider), statusMap[provider] != nil {
+                result.append(provider)
+            }
+        }.prefix(4))
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+
+        for rowProviders in stride(from: 0, to: providers.count, by: 2).map({ Array(providers[$0..<min($0 + 2, providers.count)]) }) {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.alignment = .top
+            row.spacing = 8
+            for provider in rowProviders {
+                let ready = statusMap[provider]?.ready == true
+                let usageText = usageMap[provider] ?? "no usage"
+                row.addArrangedSubview(providerTile(provider: provider, ready: ready, usage: compactUsage(usageText)))
+            }
+            stack.addArrangedSubview(row)
+        }
+        return stack
+    }
+
+    private func providerTile(provider: String, ready: Bool, usage: String) -> NSView {
+        let box = NSBox()
+        box.boxType = .custom
+        box.cornerRadius = 8
+        box.borderWidth = 1
+        box.borderColor = ready ? NSColor.systemGreen.withAlphaComponent(0.55) : NSColor.systemRed.withAlphaComponent(0.55)
+        box.fillColor = tileColor(ready: ready, usage: usage)
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        box.contentView?.addSubview(stack)
+
+        let name = provider == "openai" ? "OpenAI/Codex" : provider.capitalized
+        stack.addArrangedSubview(label(name, font: .systemFont(ofSize: 12, weight: .semibold)))
+        stack.addArrangedSubview(label(ready ? "ON" : "OFF", font: .systemFont(ofSize: 22, weight: .bold), color: ready ? .systemGreen : .systemRed))
+        stack.addArrangedSubview(label(usage, font: .monospacedSystemFont(ofSize: 10, weight: .regular), color: .secondaryLabelColor))
+
+        NSLayoutConstraint.activate([
+            box.widthAnchor.constraint(equalToConstant: 182),
+            box.heightAnchor.constraint(equalToConstant: 74),
+            stack.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: box.contentView!.bottomAnchor, constant: -8)
+        ])
+
+        return box
+    }
+
+    private func compactUsage(_ text: String) -> String {
+        if text.contains("missing") || text.contains("unavailable") { return "no usage" }
+        if let range = text.range(of: #"[$][0-9]+(\.[0-9]+)?"#, options: .regularExpression) {
+            return String(text[range])
+        }
+        if let range = text.range(of: #"[0-9]+(\.[0-9]+)?% remaining"#, options: .regularExpression) {
+            return String(text[range])
+        }
+        if text.contains("key ready") { return "key ready" }
+        return String(text.prefix(20))
+    }
+
+    private func tileColor(ready: Bool, usage: String) -> NSColor {
+        guard ready else { return NSColor.systemRed.withAlphaComponent(0.10) }
+        if usage.contains("manual") || usage.contains("key ready") {
+            return NSColor.systemBlue.withAlphaComponent(0.10)
+        }
+        if let value = Double(usage.split(separator: "%").first ?? ""), value < 30 {
+            return NSColor.systemYellow.withAlphaComponent(0.16)
+        }
+        return NSColor.systemGreen.withAlphaComponent(0.10)
     }
 
     private func providerStatusMap(_ status: String) -> [String: (ready: Bool, model: String)] {
@@ -271,7 +357,7 @@ final class AegisPanelController: NSViewController {
         ])
         let row2 = buttonRow([
             ("Doctor", { [weak self] in self?.showCommand("Doctor", ["doctor"]) }),
-            ("Scan", { [weak self] in self?.showCommand("Scan Suggestions", ["scan", "--suggest"]) }),
+            ("Add Provider", { [weak self] in self?.addProvider() }),
             ("Copy Codex", { [weak self] in self?.copyCommand(["export", "codex"]) })
         ])
         let row3 = buttonRow([
@@ -349,6 +435,46 @@ final class AegisPanelController: NSViewController {
         ]
     }
 
+    private func addProvider() {
+        guard let name = promptText(title: "Add Provider", message: "Provider name, e.g. kimi", placeholder: "kimi") else { return }
+        let normalized = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        let defaultEnv = "\(normalized.uppercased())_API_KEY"
+        guard let env = promptText(title: "Add Provider", message: "API key environment variable", placeholder: defaultEnv) else { return }
+        guard let baseURL = promptText(title: "Add Provider", message: "Base URL", placeholder: "https://api.moonshot.cn/v1") else { return }
+        guard let model = promptText(title: "Add Provider", message: "Default model", placeholder: "kimi-k2") else { return }
+
+        let output = runAegis(["provider", "add", normalized, env, baseURL, model])
+        if output.hasPrefix("aegis:") {
+            showOutput(title: "Add Provider", output: output)
+            return
+        }
+
+        if let secret = promptForAPIKey(provider: (normalized, normalized.capitalized, [])) {
+            _ = runAegis(["key", "set", normalized, "personal"], input: secret)
+        }
+        showOutput(title: "Add Provider", output: output.isEmpty ? "Provider added." : output)
+        onRefresh()
+    }
+
+    private func promptText(title: String, message: String, placeholder: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        input.placeholderString = placeholder
+        input.stringValue = placeholder
+        alert.accessoryView = input
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     private func promptForAPIKey(provider: (name: String, displayName: String, keyURLArg: [String])) -> String? {
         let alert = NSAlert()
         alert.messageText = "Add \(provider.displayName) API Key"
@@ -370,7 +496,9 @@ final class AegisPanelController: NSViewController {
                 }
                 NSSound.beep()
             } else if response == .alertThirdButtonReturn {
-                runSilent(provider.keyURLArg)
+                if !provider.keyURLArg.isEmpty {
+                    runSilent(provider.keyURLArg)
+                }
             } else {
                 return nil
             }

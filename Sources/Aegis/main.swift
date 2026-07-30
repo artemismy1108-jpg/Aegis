@@ -164,6 +164,8 @@ func run(_ args: [String]) throws {
         try runOpen(config: config, args: Array(args.dropFirst()))
     case "key":
         try runKeyCommand(Array(args.dropFirst()))
+    case "provider":
+        try runProviderCommand(Array(args.dropFirst()))
     default:
         throw AegisError.message("unknown command '\(args.first!)'")
     }
@@ -187,6 +189,7 @@ func printHelp() {
       aegis key list
       aegis key reveal <provider> <alias>
       aegis key delete <provider> <alias>
+      aegis provider add <name> <api-key-env> <base-url> <model>
 
     Config:
       ~/.config/aegis/config.json
@@ -289,6 +292,14 @@ func writeSampleConfig() throws {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     try encoder.encode(sample).write(to: url, options: .atomic)
     print("wrote \(url.path)")
+}
+
+func saveConfig(_ config: AegisConfig) throws {
+    let url = configURL()
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    try encoder.encode(config).write(to: url, options: .atomic)
 }
 
 func runSetup() throws {
@@ -832,6 +843,36 @@ func runKeyCommand(_ args: [String]) throws {
         print("deleted \(args[1])/\(args[2]) from Keychain")
     default:
         throw AegisError.message("usage: aegis key [set|list|reveal|delete]")
+    }
+}
+
+func runProviderCommand(_ args: [String]) throws {
+    switch args.first {
+    case "add":
+        guard args.count >= 5 else {
+            throw AegisError.message("usage: aegis provider add <name> <api-key-env> <base-url> <model>")
+        }
+        let name = args[1].lowercased()
+        let env = args[2]
+        let baseURL = args[3]
+        let model = args[4]
+        var config = try loadConfig()
+        config.providers[name] = ProviderConfig(
+            baseURL: baseURL,
+            apiKeyEnv: env,
+            keyAlias: "personal",
+            defaultModel: model,
+            monthlyBudgetUSD: nil,
+            manualUsedUSD: nil,
+            dashboardURL: nil,
+            billingURL: nil,
+            keyURL: nil,
+            configPaths: ["~/.zshrc", "~/.config/aegis/config.json"]
+        )
+        try saveConfig(config)
+        print("added provider \(name)")
+    default:
+        throw AegisError.message("usage: aegis provider add <name> <api-key-env> <base-url> <model>")
     }
 }
 
