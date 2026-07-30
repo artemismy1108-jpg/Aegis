@@ -210,27 +210,33 @@ final class AegisPanelController: NSViewController {
             for provider in rowProviders {
                 let ready = statusMap[provider]?.ready == true
                 let usageText = usageMap[provider] ?? "no usage"
-                row.addArrangedSubview(providerTile(provider: provider, ready: ready, usage: compactUsage(usageText)))
+                row.addArrangedSubview(providerTile(provider: provider, ready: ready, usage: compactUsage(usageText), detail: usageText))
             }
             stack.addArrangedSubview(row)
         }
         return stack
     }
 
-    private func providerTile(provider: String, ready: Bool, usage: String) -> NSView {
-        let box = NSBox()
-        box.boxType = .custom
-        box.cornerRadius = 8
-        box.borderWidth = 1
-        box.borderColor = ready ? NSColor.systemGreen.withAlphaComponent(0.55) : NSColor.systemRed.withAlphaComponent(0.55)
-        box.fillColor = tileColor(ready: ready, usage: usage)
+    private func providerTile(provider: String, ready: Bool, usage: String, detail: String) -> NSView {
+        let tile = ProviderTileView(
+            provider: provider,
+            tooltip: "\(provider)\n\(detail)\nClick to copy API key",
+            action: { [weak self] provider in
+                self?.copyAPIKey(provider: provider)
+            }
+        )
+        tile.wantsLayer = true
+        tile.layer?.cornerRadius = 8
+        tile.layer?.borderWidth = 1
+        tile.layer?.borderColor = (ready ? NSColor.systemGreen.withAlphaComponent(0.55) : NSColor.systemRed.withAlphaComponent(0.55)).cgColor
+        tile.layer?.backgroundColor = tileColor(ready: ready, usage: usage).cgColor
 
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 3
         stack.translatesAutoresizingMaskIntoConstraints = false
-        box.contentView?.addSubview(stack)
+        tile.addSubview(stack)
 
         let name = provider == "openai" ? "OpenAI/Codex" : provider.capitalized
         stack.addArrangedSubview(label(name, font: .systemFont(ofSize: 12, weight: .semibold)))
@@ -238,15 +244,15 @@ final class AegisPanelController: NSViewController {
         stack.addArrangedSubview(label(usage, font: .monospacedSystemFont(ofSize: 10, weight: .regular), color: .secondaryLabelColor))
 
         NSLayoutConstraint.activate([
-            box.widthAnchor.constraint(equalToConstant: 182),
-            box.heightAnchor.constraint(equalToConstant: 74),
-            stack.leadingAnchor.constraint(equalTo: box.contentView!.leadingAnchor, constant: 10),
-            stack.trailingAnchor.constraint(equalTo: box.contentView!.trailingAnchor, constant: -10),
-            stack.topAnchor.constraint(equalTo: box.contentView!.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: box.contentView!.bottomAnchor, constant: -8)
+            tile.widthAnchor.constraint(equalToConstant: 182),
+            tile.heightAnchor.constraint(equalToConstant: 74),
+            stack.leadingAnchor.constraint(equalTo: tile.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: tile.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: tile.bottomAnchor, constant: -8)
         ])
 
-        return box
+        return tile
     }
 
     private func compactUsage(_ text: String) -> String {
@@ -523,7 +529,10 @@ final class AegisPanelController: NSViewController {
 
     private func copyAPIKey() {
         guard let provider = chooseProvider(title: "Copy API Key", actionTitle: "Copy", message: "Choose one key to copy directly to clipboard.") else { return }
+        copyAPIKey(provider: provider)
+    }
 
+    private func copyAPIKey(provider: String) {
         let key = runAegis(["key", "reveal", provider, "personal"])
         guard !key.isEmpty, !key.hasPrefix("aegis:") else {
             showOutput(title: "Copy API Key", output: key.isEmpty ? "No key found for \(provider)." : key)
@@ -659,6 +668,31 @@ final class ClosureButton: NSButton {
 
     @objc private func run() {
         closure()
+    }
+}
+
+final class ProviderTileView: NSView {
+    private let provider: String
+    private let action: (String) -> Void
+
+    init(provider: String, tooltip: String, action: @escaping (String) -> Void) {
+        self.provider = provider
+        self.action = action
+        super.init(frame: .zero)
+        self.toolTip = tooltip
+        self.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        action(provider)
     }
 }
 
