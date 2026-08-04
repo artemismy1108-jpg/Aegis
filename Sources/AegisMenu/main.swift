@@ -1,6 +1,16 @@
 import AppKit
 import Foundation
 
+struct ProviderTileSpec {
+    var id: String
+    var title: String
+    var ready: Bool
+    var usage: String
+    var detail: String
+    var copyProvider: String?
+    var copyAlias: String?
+}
+
 final class AegisMenuApp: NSObject, NSApplicationDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
@@ -178,7 +188,7 @@ final class AegisPanelController: NSViewController {
     private func modelStatusSummary(status: String, usage: String) -> String {
         let statusMap = providerStatusMap(status)
         let usageMap = providerUsageMap(usage)
-        return ["openai", "gemini", "openrouter", "minimax"].map { provider in
+        return orderedProviders(statusMap: statusMap).map { provider in
             let state = statusMap[provider]?.ready == true ? "ON " : "OFF"
             let model = statusMap[provider]?.model ?? "-"
             let usageText = usageMap[provider] ?? "usage unavailable"
@@ -189,47 +199,122 @@ final class AegisPanelController: NSViewController {
     private func providerGrid(status: String, usage: String) -> NSView {
         let statusMap = providerStatusMap(status)
         let usageMap = providerUsageMap(usage)
-        let preferred = ["openai", "gemini", "openrouter", "minimax"]
-        let dynamic = statusMap.keys.sorted()
-        let providers = (preferred + dynamic).reduce(into: [String]()) { result, provider in
-            if !result.contains(provider), statusMap[provider] != nil {
-                result.append(provider)
-            }
-        }
+        let tiles = providerTiles(statusMap: statusMap, usageMap: usageMap)
 
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
 
-        for rowProviders in stride(from: 0, to: providers.count, by: 2).map({ Array(providers[$0..<min($0 + 2, providers.count)]) }) {
+        for rowTiles in stride(from: 0, to: tiles.count, by: 2).map({ Array(tiles[$0..<min($0 + 2, tiles.count)]) }) {
             let row = NSStackView()
             row.orientation = .horizontal
             row.alignment = .top
             row.spacing = 8
-            for provider in rowProviders {
-                let ready = statusMap[provider]?.ready == true
-                let usageText = usageMap[provider] ?? "no usage"
-                row.addArrangedSubview(providerTile(provider: provider, ready: ready, usage: compactUsage(usageText), detail: usageText))
+            for tile in rowTiles {
+                row.addArrangedSubview(providerTile(tile))
             }
             stack.addArrangedSubview(row)
         }
         return stack
     }
 
-    private func providerTile(provider: String, ready: Bool, usage: String, detail: String) -> NSView {
+    private func providerTiles(statusMap: [String: (ready: Bool, model: String)], usageMap: [String: String]) -> [ProviderTileSpec] {
+        var tiles: [ProviderTileSpec] = []
+        let localKeys = availableKeyRefs()
+        let localOpenRouterAliases = Set(localKeys.filter { $0.provider == "openrouter" }.map(\.alias))
+
+        for provider in orderedProviders(statusMap: statusMap) {
+            let ready = statusMap[provider]?.ready == true
+            let usageText = usageMap[provider] ?? "no usage"
+            if provider == "openrouter" {
+                tiles.append(contentsOf: openRouterTiles(usageText: usageText, ready: ready, localAliases: localOpenRouterAliases))
+                continue
+            }
+            let title = provider == "openai" ? "OpenAI/Codex" : provider.capitalized
+            tiles.append(ProviderTileSpec(
+                id: provider,
+                title: title,
+                ready: ready,
+                usage: compactUsage(usageText),
+                detail: usageText,
+                copyProvider: provider,
+                copyAlias: "personal"
+            ))
+        }
+        return tiles
+    }
+
+    private func openRouterTiles(usageText: String, ready: Bool, localAliases: Set<String>) -> [ProviderTileSpec] {
+        let parts = usageText.split(separator: ";").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let balance = parts.first ?? usageText
+        var tiles = [
+            ProviderTileSpec(
+                id: "openrouter-balance",
+                title: "OR Balance",
+                ready: ready,
+                usage: compactUsage(balance),
+                detail: usageText,
+                copyProvider: nil,
+                copyAlias: nil
+            )
+        ]
+
+        for item in parts.dropFirst() {
+            let split = item.split(separator: ":", maxSplits: 1).map(String.init)
+            guard split.count == 2 else { continue }
+            let alias = split[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = split[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            tiles.append(ProviderTileSpec(
+                id: "openrouter-\(alias)",
+                title: "OR / \(alias)",
+                ready: localAliases.contains(alias),
+                usage: compactOpenRouterKeyUsage(detail),
+                detail: "\(alias): \(detail)",
+                copyProvider: "openrouter",
+                copyAlias: alias
+            ))
+        }
+
+        if tiles.count == 1, !usageText.contains("missing") {
+            for keyRef in availableKeyRefs().filter({ $0.provider == "openrouter" && $0.alias != "management" }) {
+                tiles.append(ProviderTileSpec(
+                    id: "openrouter-\(keyRef.alias)",
+                    title: "OR / \(keyRef.alias)",
+                    ready: true,
+                    usage: "key saved",
+                    detail: "Local key saved. Refresh usage after OpenRouter responds.",
+                    copyProvider: "openrouter",
+                    copyAlias: keyRef.alias
+                ))
+            }
+        }
+        return tiles
+    }
+
+    private func orderedProviders(statusMap: [String: (ready: Bool, model: String)]) -> [String] {
+        let preferred = ["openrouter", "openai"]
+        let trailing = ["gemini"]
+        let suppressed = Set(["minimax", "kimi"])
+        let dynamic = statusMap.keys.sorted().filter {
+            !preferred.contains($0) && !trailing.contains($0) && !suppressed.contains($0)
+        }
+        return (preferred + dynamic + trailing).filter { statusMap[$0] != nil }
+    }
+
+    private func providerTile(_ spec: ProviderTileSpec) -> NSView {
         let tile = ProviderTileView(
-            provider: provider,
-            tooltip: "\(provider)\n\(detail)\nClick to copy API key",
-            action: { [weak self] provider in
-                self?.copyAPIKey(provider: provider)
+            id: spec.id,
+            tooltip: "\(spec.title)\n\(spec.detail)\nClick to copy API key",
+            action: { [weak self] _ in
+                self?.copyTileAPIKey(spec)
             }
         )
         tile.wantsLayer = true
         tile.layer?.cornerRadius = 8
         tile.layer?.borderWidth = 1
-        tile.layer?.borderColor = (ready ? NSColor.systemGreen.withAlphaComponent(0.55) : NSColor.systemRed.withAlphaComponent(0.55)).cgColor
-        tile.layer?.backgroundColor = tileColor(ready: ready, usage: usage).cgColor
+        tile.layer?.borderColor = (spec.ready ? NSColor.systemGreen.withAlphaComponent(0.55) : NSColor.systemRed.withAlphaComponent(0.55)).cgColor
+        tile.layer?.backgroundColor = tileColor(ready: spec.ready, usage: spec.usage).cgColor
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -238,10 +323,9 @@ final class AegisPanelController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         tile.addSubview(stack)
 
-        let name = provider == "openai" ? "OpenAI/Codex" : provider.capitalized
-        stack.addArrangedSubview(label(name, font: .systemFont(ofSize: 12, weight: .semibold)))
-        stack.addArrangedSubview(label(ready ? "ON" : "OFF", font: .systemFont(ofSize: 22, weight: .bold), color: ready ? .systemGreen : .systemRed))
-        stack.addArrangedSubview(label(usage, font: .monospacedSystemFont(ofSize: 10, weight: .regular), color: .secondaryLabelColor))
+        stack.addArrangedSubview(label(spec.title, font: .systemFont(ofSize: 12, weight: .semibold)))
+        stack.addArrangedSubview(label(spec.ready ? "ON" : "OFF", font: .systemFont(ofSize: 22, weight: .bold), color: spec.ready ? .systemGreen : .systemRed))
+        stack.addArrangedSubview(label(spec.usage, font: .monospacedSystemFont(ofSize: 10, weight: .regular), color: .secondaryLabelColor))
 
         NSLayoutConstraint.activate([
             tile.widthAnchor.constraint(equalToConstant: 182),
@@ -264,6 +348,20 @@ final class AegisPanelController: NSViewController {
             return String(text[range])
         }
         if text.contains("key ready") { return "key ready" }
+        return String(text.prefix(20))
+    }
+
+    private func compactOpenRouterKeyUsage(_ text: String) -> String {
+        if let range = text.range(of: #"month [$][0-9]+(\.[0-9]+)?"#, options: .regularExpression) {
+            return String(text[range]).replacingOccurrences(of: "month ", with: "")
+        }
+        if let range = text.range(of: #"used [$][0-9]+(\.[0-9]+)?"#, options: .regularExpression) {
+            return String(text[range]).replacingOccurrences(of: "used ", with: "")
+        }
+        if let range = text.range(of: #"today [$][0-9]+(\.[0-9]+)?"#, options: .regularExpression) {
+            return String(text[range])
+        }
+        if text.contains("unavailable") { return "no usage" }
         return String(text.prefix(20))
     }
 
@@ -364,15 +462,16 @@ final class AegisPanelController: NSViewController {
         let row2 = buttonRow([
             ("Refresh", { [weak self] in self?.onRefresh() }),
             ("Setup", { [weak self] in self?.setupAndRefresh() }),
-            ("Add Provider", { [weak self] in self?.addProvider() }),
+            ("Add OR Key", { [weak self] in self?.addOpenRouterKey() })
         ])
         let row3 = buttonRow([
+            ("OR Mgmt", { [weak self] in self?.addOpenRouterManagementKey() }),
             ("OR Keys", { [weak self] in self?.runSilent(["open", "openrouter", "keys"]) }),
-            ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
-            ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) })
+            ("Add Provider", { [weak self] in self?.addProvider() })
         ])
         let row4 = buttonRow([
-            ("MiniMax", { [weak self] in self?.runSilent(["open", "minimax", "dashboard"]) }),
+            ("OpenAI Bill", { [weak self] in self?.runSilent(["open", "openai", "billing"]) }),
+            ("Gemini Keys", { [weak self] in self?.runSilent(["open", "gemini", "keys"]) }),
             ("Quit", { NSApp.terminate(nil) })
         ])
 
@@ -436,8 +535,7 @@ final class AegisPanelController: NSViewController {
         [
             ("openrouter", "OpenRouter", ["open", "openrouter", "keys"]),
             ("openai", "OpenAI", ["open", "openai", "keys"]),
-            ("gemini", "Gemini", ["open", "gemini", "keys"]),
-            ("minimax", "MiniMax", ["open", "minimax", "dashboard"])
+            ("gemini", "Gemini", ["open", "gemini", "keys"])
         ]
     }
 
@@ -465,6 +563,28 @@ final class AegisPanelController: NSViewController {
             _ = runAegis(["key", "set", normalized, "personal"], input: secret)
         }
         showOutput(title: "Add Provider", output: output.isEmpty ? "Provider added." : output)
+        onRefresh()
+    }
+
+    private func addOpenRouterKey() {
+        guard let alias = promptText(title: "Add OpenRouter Key", message: "Key alias, e.g. personal, work, cursor", placeholder: "personal") else { return }
+        let normalized = alias.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized != "management" else {
+            showOutput(title: "Add OpenRouter Key", output: "Use OR Mgmt for the Management API key.")
+            return
+        }
+        guard !normalized.isEmpty else { return }
+        guard let secret = promptForAPIKey(provider: ("openrouter", "OpenRouter \(normalized)", ["open", "openrouter", "keys"])) else { return }
+
+        let output = runAegis(["key", "set", "openrouter", normalized], input: secret)
+        showOutput(title: "Add OpenRouter Key", output: output.isEmpty ? "OpenRouter/\(normalized) stored." : output)
+        onRefresh()
+    }
+
+    private func addOpenRouterManagementKey() {
+        guard let secret = promptForAPIKey(provider: ("openrouter", "OpenRouter Management", ["open", "openrouter", "keys"])) else { return }
+        let output = runAegis(["key", "set", "openrouter", "management"], input: secret)
+        showOutput(title: "OpenRouter Management", output: output.isEmpty ? "OpenRouter/management stored." : output)
         onRefresh()
     }
 
@@ -528,42 +648,97 @@ final class AegisPanelController: NSViewController {
     }
 
     private func copyAPIKey() {
-        guard let provider = chooseProvider(title: "Copy API Key", actionTitle: "Copy", message: "Choose one key to copy directly to clipboard.") else { return }
-        copyAPIKey(provider: provider)
+        guard let keyRef = chooseKey(title: "Copy API Key", actionTitle: "Copy", message: "Choose one key to copy directly to clipboard.") else { return }
+        copyAPIKey(provider: keyRef.provider, alias: keyRef.alias)
     }
 
     private func copyAPIKey(provider: String) {
-        let key = runAegis(["key", "reveal", provider, "personal"])
+        let alias = provider == "openrouter" ? preferredOpenRouterAlias() : "personal"
+        copyAPIKey(provider: provider, alias: alias)
+    }
+
+    private func copyAPIKey(provider: String, alias: String) {
+        let key = runAegis(["key", "reveal", provider, alias])
         guard !key.isEmpty, !key.hasPrefix("aegis:") else {
-            showOutput(title: "Copy API Key", output: key.isEmpty ? "No key found for \(provider)." : key)
+            showOutput(title: "Copy API Key", output: key.isEmpty ? "No key found for \(provider)/\(alias)." : key)
             return
         }
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(key, forType: .string)
-        showOutput(title: "Copy API Key", output: "\(provider) API key copied to clipboard.")
+        showOutput(title: "Copy API Key", output: "\(provider)/\(alias) API key copied to clipboard.")
+    }
+
+    private func copyTileAPIKey(_ spec: ProviderTileSpec) {
+        guard let provider = spec.copyProvider, let alias = spec.copyAlias else {
+            showOutput(title: "Copy API Key", output: "\(spec.title) is a usage card, not an API key.")
+            return
+        }
+        copyAPIKey(provider: provider, alias: alias)
     }
 
     private func updateAPIKey() {
-        guard let provider = chooseProvider(title: "Update API Key", actionTitle: "Update", message: "Choose the provider whose key should be replaced.") else { return }
-        guard let secret = promptForAPIKey(provider: (provider, provider.capitalized, [])) else { return }
-        let output = runAegis(["key", "set", provider, "personal"], input: secret)
-        showOutput(title: "Update API Key", output: output.isEmpty ? "\(provider) key updated." : output)
+        guard let keyRef = chooseKey(title: "Update API Key", actionTitle: "Update", message: "Choose the key that should be replaced.") else { return }
+        guard let secret = promptForAPIKey(provider: (keyRef.provider, keyRef.provider.capitalized, [])) else { return }
+        let output = runAegis(["key", "set", keyRef.provider, keyRef.alias], input: secret)
+        showOutput(title: "Update API Key", output: output.isEmpty ? "\(keyRef.provider)/\(keyRef.alias) key updated." : output)
         onRefresh()
     }
 
     private func deleteAPIKey() {
-        guard let provider = chooseProvider(title: "Delete API Key", actionTitle: "Delete", message: "Choose the provider key to delete from macOS Keychain.") else { return }
+        guard let keyRef = chooseKey(title: "Delete API Key", actionTitle: "Delete", message: "Choose the provider key to delete from macOS Keychain.") else { return }
         let confirm = NSAlert()
-        confirm.messageText = "Delete \(provider) API Key?"
-        confirm.informativeText = "This removes the Keychain item aegis.\(provider)/personal. It does not edit your provider config."
+        confirm.messageText = "Delete \(keyRef.provider)/\(keyRef.alias) API Key?"
+        confirm.informativeText = "This removes the Keychain item aegis.\(keyRef.provider)/\(keyRef.alias)."
         confirm.addButton(withTitle: "Delete")
         confirm.addButton(withTitle: "Cancel")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
-        let output = runAegis(["key", "delete", provider, "personal"])
-        showOutput(title: "Delete API Key", output: output.isEmpty ? "\(provider) key deleted." : output)
+        let output = runAegis(["key", "delete", keyRef.provider, keyRef.alias])
+        showOutput(title: "Delete API Key", output: output.isEmpty ? "\(keyRef.provider)/\(keyRef.alias) key deleted." : output)
         onRefresh()
+    }
+
+    private func chooseKey(title: String, actionTitle: String, message: String) -> (provider: String, alias: String)? {
+        let keyRefs = availableKeyRefs()
+        guard !keyRefs.isEmpty else {
+            showOutput(title: title, output: "No keys configured.")
+            return nil
+        }
+
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: actionTitle)
+        alert.addButton(withTitle: "Cancel")
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 320, height: 26), pullsDown: false)
+        popup.addItems(withTitles: keyRefs.map { "\($0.provider)/\($0.alias)" })
+        alert.accessoryView = popup
+
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let selected = popup.selectedItem?.title
+        else {
+            return nil
+        }
+        let parts = selected.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        return (parts[0], parts[1])
+    }
+
+    private func availableKeyRefs() -> [(provider: String, alias: String)] {
+        runAegis(["key", "list"])
+            .split(separator: "\n")
+            .map(String.init)
+            .compactMap { line in
+                let parts = line.split(separator: "/", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { return nil }
+                return (parts[0], parts[1])
+            }
+    }
+
+    private func preferredOpenRouterAlias() -> String {
+        availableKeyRefs().first { $0.provider == "openrouter" }?.alias ?? "personal"
     }
 
     private func chooseProvider(title: String, actionTitle: String, message: String) -> String? {
@@ -672,11 +847,11 @@ final class ClosureButton: NSButton {
 }
 
 final class ProviderTileView: NSView {
-    private let provider: String
+    private let id: String
     private let action: (String) -> Void
 
-    init(provider: String, tooltip: String, action: @escaping (String) -> Void) {
-        self.provider = provider
+    init(id: String, tooltip: String, action: @escaping (String) -> Void) {
+        self.id = id
         self.action = action
         super.init(frame: .zero)
         self.toolTip = tooltip
@@ -692,7 +867,7 @@ final class ProviderTileView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        action(provider)
+        action(id)
     }
 }
 

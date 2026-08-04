@@ -10,6 +10,7 @@ struct ProviderConfig: Codable {
     var baseURL: String
     var apiKeyEnv: String
     var keyAlias: String?
+    var keyAliases: [String]?
     var defaultModel: String?
     var monthlyBudgetUSD: Double?
     var manualUsedUSD: Double?
@@ -81,6 +82,10 @@ struct OpenRouterKeyResponse: Codable {
     var data: OpenRouterKeyData
 }
 
+struct OpenRouterKeysResponse: Codable {
+    var data: [OpenRouterManagedKeyData]
+}
+
 struct OpenRouterKeyData: Codable {
     var limit: Double?
     var usage: Double?
@@ -90,6 +95,32 @@ struct OpenRouterKeyData: Codable {
 
     enum CodingKeys: String, CodingKey {
         case limit
+        case usage
+        case usageDaily = "usage_daily"
+        case usageWeekly = "usage_weekly"
+        case usageMonthly = "usage_monthly"
+    }
+}
+
+struct OpenRouterManagedKeyData: Codable {
+    var hash: String?
+    var name: String?
+    var label: String?
+    var disabled: Bool?
+    var limit: Double?
+    var limitRemaining: Double?
+    var usage: Double?
+    var usageDaily: Double?
+    var usageWeekly: Double?
+    var usageMonthly: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case hash
+        case name
+        case label
+        case disabled
+        case limit
+        case limitRemaining = "limit_remaining"
         case usage
         case usageDaily = "usage_daily"
         case usageWeekly = "usage_weekly"
@@ -229,6 +260,7 @@ func writeSampleConfig() throws {
                 baseURL: "https://api.openai.com/v1",
                 apiKeyEnv: "OPENAI_API_KEY",
                 keyAlias: "personal",
+                keyAliases: ["personal"],
                 defaultModel: "gpt-4.1",
                 monthlyBudgetUSD: 100,
                 manualUsedUSD: nil,
@@ -242,6 +274,7 @@ func writeSampleConfig() throws {
                 baseURL: "https://generativelanguage.googleapis.com/v1beta",
                 apiKeyEnv: "GEMINI_API_KEY",
                 keyAlias: "personal",
+                keyAliases: ["personal"],
                 defaultModel: "gemini-2.5-pro",
                 monthlyBudgetUSD: nil,
                 manualUsedUSD: nil,
@@ -255,6 +288,7 @@ func writeSampleConfig() throws {
                 baseURL: "https://openrouter.ai/api/v1",
                 apiKeyEnv: "OPENROUTER_API_KEY",
                 keyAlias: "personal",
+                keyAliases: ["personal"],
                 defaultModel: "anthropic/claude-sonnet-4",
                 monthlyBudgetUSD: nil,
                 manualUsedUSD: nil,
@@ -268,6 +302,7 @@ func writeSampleConfig() throws {
                 baseURL: "https://api.minimax.chat/v1",
                 apiKeyEnv: "MINIMAX_API_KEY",
                 keyAlias: "personal",
+                keyAliases: ["personal"],
                 defaultModel: "MiniMax-M1",
                 monthlyBudgetUSD: 100,
                 manualUsedUSD: 0,
@@ -330,6 +365,13 @@ func migrateConfigDefaults(at url: URL) throws {
     if config.providers["openai"]?.monthlyBudgetUSD == nil {
         config.providers["openai"]?.monthlyBudgetUSD = 100
         changed = true
+    }
+    for providerName in config.providers.keys {
+        let fallback = config.providers[providerName]?.keyAlias ?? "personal"
+        if config.providers[providerName]?.keyAliases == nil {
+            config.providers[providerName]?.keyAliases = [fallback]
+            changed = true
+        }
     }
     if config.providers["minimax"]?.monthlyBudgetUSD == nil {
         config.providers["minimax"]?.monthlyBudgetUSD = 100
@@ -583,26 +625,26 @@ func printUsage(config: AegisConfig, args: [String]) throws {
     guard let provider = config.providers["openrouter"] else {
         throw AegisError.message("openrouter provider is not configured")
     }
-    let apiKey = try providerAPIKey(providerName: "openrouter", provider: provider)
+    let apiKey = try openRouterAPIKeys(provider: provider).first?.key ?? providerAPIKey(providerName: "openrouter", provider: provider)
     let credits = try fetchOpenRouterCredits(baseURL: provider.baseURL, apiKey: apiKey)
-    let key = try? fetchOpenRouterKey(baseURL: provider.baseURL, apiKey: apiKey)
 
     print("OpenRouter")
     print("  balance: \(money(credits.data.balance))")
     print("  total credits: \(money(credits.data.totalCredits))")
     print("  total usage: \(money(credits.data.totalUsage)) (\(percent(credits.data.usedPercent)))")
-    if let key = key?.data {
-        if let daily = key.usageDaily { print("  today: \(money(daily))") }
-        if let weekly = key.usageWeekly { print("  week: \(money(weekly))") }
-        if let monthly = key.usageMonthly { print("  month: \(money(monthly))") }
-        if let limit = key.limit, let usage = key.usage {
-            print("  key limit: \(money(usage)) / \(money(limit))")
-        }
+    for line in openRouterKeyUsageLines(provider: provider) {
+        print("  \(line)")
     }
 }
 
 func printUsageSummary(config: AegisConfig) {
-    for providerName in ["openrouter", "openai", "minimax", "gemini"] {
+    let preferred = ["openrouter", "openai"]
+    let trailing = ["gemini"]
+    let suppressed = Set(["minimax", "kimi"])
+    let dynamic = config.providers.keys.sorted().filter {
+        !preferred.contains($0) && !trailing.contains($0) && !suppressed.contains($0)
+    }
+    for providerName in preferred + dynamic + trailing {
         guard let provider = config.providers[providerName] else { continue }
         print(providerUsageLine(providerName: providerName, provider: provider))
     }
@@ -611,14 +653,7 @@ func printUsageSummary(config: AegisConfig) {
 func providerUsageLine(providerName: String, provider: ProviderConfig) -> String {
     switch providerName {
     case "openrouter":
-        do {
-            let apiKey = try providerAPIKey(providerName: providerName, provider: provider)
-            let credits = try fetchOpenRouterCredits(baseURL: provider.baseURL, apiKey: apiKey)
-            let remaining = 100 - credits.data.usedPercent
-            return "openrouter: \(percent(remaining)) remaining, \(money(credits.data.balance)) left"
-        } catch {
-            return "openrouter: missing key or usage unavailable"
-        }
+        return openRouterSummaryLine(provider: provider)
     case "openai":
         if let codexRemaining = latestCodexRemainingPercent() {
             return "openai: \(percent(codexRemaining)) remaining, codex local"
@@ -648,6 +683,96 @@ func providerUsageLine(providerName: String, provider: ProviderConfig) -> String
         return ready ? "gemini: key ready, quota API not configured" : "gemini: missing key"
     default:
         return "\(providerName): unsupported"
+    }
+}
+
+func providerAliases(_ provider: ProviderConfig) -> [String] {
+    let aliases = provider.keyAliases ?? [provider.keyAlias ?? "personal"]
+    return Array(Set(aliases)).sorted()
+}
+
+func openRouterAPIKeys(provider: ProviderConfig) -> [(alias: String, key: String)] {
+    var keys: [(alias: String, key: String)] = providerAliases(provider).compactMap { alias in
+        guard alias != "management" else { return nil }
+        guard let key = try? keychainReveal(provider: "openrouter", alias: alias),
+              !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+        return (alias, key)
+    }
+    if keys.isEmpty, let envKey = try? providerAPIKey(providerName: "openrouter", provider: provider) {
+        keys.append(("env", envKey))
+    }
+    return keys
+}
+
+func openRouterManagementKey(provider: ProviderConfig) -> String? {
+    if let key = try? keychainReveal(provider: "openrouter", alias: "management"),
+       !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        return key
+    }
+    return nil
+}
+
+func openRouterManagedKeyUsageLines(provider: ProviderConfig) -> [String]? {
+    guard let managementKey = openRouterManagementKey(provider: provider) else { return nil }
+    guard let response = try? fetchOpenRouterKeys(baseURL: provider.baseURL, apiKey: managementKey) else { return nil }
+    return response.data
+        .filter { $0.disabled != true }
+        .map { key in
+            let name = key.name ?? key.label ?? key.hash.map { String($0.prefix(8)) } ?? "key"
+            var parts = ["\(name):"]
+            if let monthly = key.usageMonthly { parts.append("month \(money(monthly))") }
+            if let weekly = key.usageWeekly { parts.append("week \(money(weekly))") }
+            if let daily = key.usageDaily { parts.append("today \(money(daily))") }
+            if let used = key.usage, let limit = key.limit {
+                parts.append("limit \(money(used))/\(money(limit))")
+            } else if let used = key.usage {
+                parts.append("used \(money(used))")
+            }
+            if let remaining = key.limitRemaining {
+                parts.append("remaining \(money(remaining))")
+            }
+            return parts.joined(separator: " ")
+        }
+}
+
+func openRouterKeyUsageLines(provider: ProviderConfig) -> [String] {
+    if let managedLines = openRouterManagedKeyUsageLines(provider: provider) {
+        return managedLines
+    }
+    return openRouterAPIKeys(provider: provider).map { alias, key -> String in
+        do {
+            let usage = try fetchOpenRouterKey(baseURL: provider.baseURL, apiKey: key).data
+            var parts = ["\(alias):"]
+            if let monthly = usage.usageMonthly { parts.append("month \(money(monthly))") }
+            if let weekly = usage.usageWeekly { parts.append("week \(money(weekly))") }
+            if let daily = usage.usageDaily { parts.append("today \(money(daily))") }
+            if let used = usage.usage, let limit = usage.limit {
+                parts.append("limit \(money(used))/\(money(limit))")
+            } else if let used = usage.usage {
+                parts.append("used \(money(used))")
+            }
+            return parts.joined(separator: " ")
+        } catch {
+            return "\(alias): usage unavailable"
+        }
+    }
+}
+
+func openRouterSummaryLine(provider: ProviderConfig) -> String {
+    let keys = openRouterAPIKeys(provider: provider)
+    guard let first = keys.first else {
+        return "openrouter: missing key or usage unavailable"
+    }
+    do {
+        let credits = try fetchOpenRouterCredits(baseURL: provider.baseURL, apiKey: first.key)
+        let keyLines = openRouterKeyUsageLines(provider: provider)
+        let keySummary = keyLines.isEmpty ? "0 keys" : keyLines.joined(separator: "; ")
+        return "openrouter: \(money(credits.data.balance)) left, \(keyLines.count) keys; \(keySummary)"
+    } catch {
+        return "openrouter: \(keys.count) keys, balance unavailable"
     }
 }
 
@@ -797,6 +922,10 @@ func fetchOpenRouterKey(baseURL: String, apiKey: String) throws -> OpenRouterKey
     try fetchOpenRouter(path: "key", baseURL: baseURL, apiKey: apiKey)
 }
 
+func fetchOpenRouterKeys(baseURL: String, apiKey: String) throws -> OpenRouterKeysResponse {
+    try fetchOpenRouter(path: "keys", baseURL: baseURL, apiKey: apiKey)
+}
+
 func fetchOpenRouter<T: Decodable>(path: String, baseURL: String, apiKey: String) throws -> T {
     guard let url = URL(string: baseURL)?.appendingPathComponent(path) else {
         throw AegisError.message("invalid OpenRouter base URL: \(baseURL)")
@@ -892,6 +1021,7 @@ func runKeyCommand(_ args: [String]) throws {
             throw AegisError.message("pipe the API key on stdin, e.g. printf '%s' \"$OPENROUTER_API_KEY\" | aegis key set openrouter personal")
         }
         try keychainSet(provider: args[1], alias: args[2], secret: secret)
+        try rememberKeyAlias(providerName: args[1], alias: args[2])
         print("stored \(args[1])/\(args[2]) in Keychain")
     case "list":
         try keychainList()
@@ -901,10 +1031,30 @@ func runKeyCommand(_ args: [String]) throws {
     case "delete":
         guard args.count == 3 else { throw AegisError.message("usage: aegis key delete <provider> <alias>") }
         try keychainDelete(provider: args[1], alias: args[2])
+        try forgetKeyAlias(providerName: args[1], alias: args[2])
         print("deleted \(args[1])/\(args[2]) from Keychain")
     default:
         throw AegisError.message("usage: aegis key [set|list|reveal|delete]")
     }
+}
+
+func rememberKeyAlias(providerName: String, alias: String) throws {
+    var config = try loadConfig()
+    guard config.providers[providerName] != nil else { return }
+    var aliases = config.providers[providerName]?.keyAliases ?? []
+    if !aliases.contains(alias) {
+        aliases.append(alias)
+        config.providers[providerName]?.keyAliases = aliases.sorted()
+        try saveConfig(config)
+    }
+}
+
+func forgetKeyAlias(providerName: String, alias: String) throws {
+    var config = try loadConfig()
+    guard config.providers[providerName] != nil else { return }
+    let aliases = (config.providers[providerName]?.keyAliases ?? []).filter { $0 != alias }
+    config.providers[providerName]?.keyAliases = aliases.sorted()
+    try saveConfig(config)
 }
 
 func runProviderCommand(_ args: [String]) throws {
@@ -922,6 +1072,7 @@ func runProviderCommand(_ args: [String]) throws {
             baseURL: baseURL,
             apiKeyEnv: env,
             keyAlias: "personal",
+            keyAliases: ["personal"],
             defaultModel: model,
             monthlyBudgetUSD: nil,
             manualUsedUSD: nil,
@@ -1003,25 +1154,18 @@ func keychainDelete(provider: String, alias: String) throws {
 }
 
 func keychainHasKey(provider: String, alias: String) -> Bool {
-    (try? keychainRun([
-        "find-generic-password",
-        "-s", keychainService(provider: provider),
-        "-a", alias
-    ], allowFailure: true)).map { !$0.isEmpty } ?? false
+    guard let key = try? keychainReveal(provider: provider, alias: alias) else { return false }
+    return !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 }
 
 func keychainList() throws {
-    let providers = ["gemini", "minimax", "openai", "openrouter"]
+    let config = try? loadConfig()
+    let providers = config?.providers.keys.sorted() ?? ["gemini", "minimax", "openai", "openrouter"]
     var found = false
     for provider in providers {
-        let output = try keychainRun([
-            "find-generic-password",
-            "-s", keychainService(provider: provider)
-        ], allowFailure: true)
-        for line in output.split(separator: "\n") where line.contains("\"acct\"") {
-            let alias = line
-                .replacingOccurrences(of: #"^\s*"acct"<blob>="#, with: "", options: .regularExpression)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        let providerConfig = config?.providers[provider]
+        let aliases = providerConfig.map(providerAliases) ?? ["personal"]
+        for alias in aliases where keychainHasKey(provider: provider, alias: alias) {
             print("\(provider)/\(alias)")
             found = true
         }
